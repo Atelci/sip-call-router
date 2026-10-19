@@ -31,14 +31,14 @@ mvn verify                                            # build + tests
 
 ## Current status
 
-- The Java code was scaffolded **without being compiled** (no Maven access in the scaffolding environment).
-  First job: `mvn verify`, fix whatever breaks, then run the end-to-end demo.
-- `callgen.py` was tested against a fake SIP server: connect, queue, 486 and CANCEL paths all work.
+- `mvn verify` passes (no tests yet) and the end-to-end demo with `callgen.py` works against the real app:
+  connect, FIFO queue, 486 when full, BYE drains queue, CANCEL -> 487. Maven wrapper is in the repo.
+- On this Windows machine the default `java` is 1.8: set `JAVA_HOME="C:\Program Files\Java\jdk-21.0.12"`.
 - JAIN-SIP needs the log4j 1.x API: `reload4j` provides it (old `log4j` is excluded in the pom).
 
 ## Backlog (in priority order)
 
-1. Get it compiling and running end to end with `callgen.py`. Add the Maven wrapper (`mvn -N wrapper:wrapper`).
+1. ~~Get it compiling and running end to end with `callgen.py`. Add the Maven wrapper.~~ Done 2026-10-19.
 2. Tests: `CallRouter` with a fake `CallSignaling` against real Redis via Testcontainers
    (connect, queue FIFO order, queue full -> reject, BYE drains queue, CANCEL removes from queue).
 3. Make "pop queued call + claim agent" atomic in one Redis Lua script (multi-instance safe).

@@ -42,11 +42,12 @@ flowchart LR
 
 ## Run it
 
-Requirements: Java 21, Maven, Docker (for Redis), Python 3.10+.
+Requirements: Java 21 (`JAVA_HOME` must point at it), Docker (for Redis), Python 3.10+.
+Maven is optional: the Maven wrapper (`./mvnw`, or `mvnw.cmd` on Windows) downloads it.
 
 ```bash
 docker compose up -d redis          # Redis on :6379
-mvn spring-boot:run                 # SIP on udp/5060, REST on :8080
+./mvnw spring-boot:run              # SIP on udp/5060, REST on :8080
 ```
 
 In a second terminal, place some calls (3 agents are seeded: alice, bob, carol; queue size 5):
@@ -100,7 +101,13 @@ simulator/callgen.py          SIP caller simulator (standard library only)
 <!-- Fill this in as you go: which tools, what you prompted, what you had to fix by hand. -->
 
 - Scaffolded with Claude (project structure, SIP handler, Redis model, simulator)
-- Continued in Claude Code: ...
+- Continued in Claude Code: first `mvn verify` and the end-to-end run with `callgen.py`.
+  The scaffold compiled and ran on the first try; no Java changes were needed. Things that came up:
+  - The machine's default `java` was 1.8, so the build needs `JAVA_HOME` pointing at a JDK 21.
+  - Added the Maven wrapper (`mvnw`, `mvnw.cmd`).
+  - A 10-caller run against 3 agents and queue size 5 gave 3 connected right away, 5 queued (FIFO) and then
+    connected as agents freed up, and 2 rejected with 486. A short `--patience` run checked CANCEL -> 487.
+  - `mvn verify` has no tests to run yet; Testcontainers tests for `CallRouter` come next.
 
 ## Next steps
 
