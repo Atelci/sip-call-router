@@ -10,6 +10,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
+import io.github.atelci.callrouter.api.EventStreamController;
 import io.github.atelci.callrouter.redis.RedisKeys;
 
 @Configuration
@@ -18,16 +19,19 @@ public class RedisConfig {
     private static final Logger eventLog = LoggerFactory.getLogger("call-events");
 
     /**
-     * Subscribes to our own event channel and logs every event. Stands in for a real
-     * consumer such as a supervisor wallboard or a reporting service.
+     * Subscribes to our own event channel: logs every event and forwards it to browsers
+     * connected to {@code /api/events}. Other consumers (the Go wallboard) subscribe on their own.
      */
     @Bean
-    RedisMessageListenerContainer callEventListener(RedisConnectionFactory connectionFactory) {
+    RedisMessageListenerContainer callEventListener(RedisConnectionFactory connectionFactory,
+                                                    EventStreamController browsers) {
+        ChannelTopic events = new ChannelTopic(RedisKeys.EVENTS_CHANNEL);
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
         container.addMessageListener(
                 (message, pattern) -> eventLog.info(new String(message.getBody(), StandardCharsets.UTF_8)),
-                new ChannelTopic(RedisKeys.EVENTS_CHANNEL));
+                events);
+        container.addMessageListener(browsers, events);
         return container;
     }
 }

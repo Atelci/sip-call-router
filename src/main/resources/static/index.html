@@ -1,0 +1,87 @@
+<!doctype html>
+<!--
+  Live browser wallboard. Served by Spring Boot at http://localhost:8080/
+  Listens to GET /api/events (Server-Sent Events fed by the Redis call-events channel)
+  and re-reads GET /api/stats whenever an event arrives. No build step, no framework.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Call Router Live</title>
+<style>
+  :root { --bg: #f7f7f5; --card: #fff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de; --accent: #2f6fdb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --card: #1f1f1d; --text: #ececea; --muted: #9a9a94; --line: #33332f; --accent: #6c9cf0; }
+  }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+         font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  #status { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  ol { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  li { padding: 6px 12px; border-top: 1px solid var(--line); font: 13px/1.5 ui-monospace, monospace;
+       white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+  li:first-child { border-top: 0; }
+  li .agent { color: var(--accent); }
+  li.empty { color: var(--muted); font-family: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Call Router Live</h1>
+  <div id="status">connecting...</div>
+
+  <div class="tiles">
+    <div class="tile"><b id="queueLength">-</b><span>calls waiting</span></div>
+    <div class="tile"><b id="activeCalls">-</b><span>calls active</span></div>
+    <div class="tile"><b id="availableAgents">-</b><span>agents free</span></div>
+    <div class="tile"><b id="avgWait">-</b><span>average wait</span></div>
+  </div>
+
+  <h2>Events</h2>
+  <ol id="events"><li class="empty">waiting for calls (run callgen.py)</li></ol>
+</main>
+
+<script>
+  const MAX_EVENTS = 30;
+  const list = document.getElementById('events');
+  const status = document.getElementById('status');
+
+  async function refreshStats() {
+    const s = await (await fetch('/api/stats')).json();
+    for (const key of ['queueLength', 'activeCalls', 'availableAgents']) {
+      document.getElementById(key).textContent = s[key] ?? 0;
+    }
+    document.getElementById('avgWait').textContent =
+      s.connected ? (s.waitMsTotal / s.connected / 1000).toFixed(1) + 's' : '-';
+  }
+
+  function addEvent(e) {
+    if (list.firstElementChild?.classList.contains('empty')) list.innerHTML = '';
+    const li = document.createElement('li');
+    const time = new Date(e.timestamp).toLocaleTimeString();
+    li.textContent = `${time}  ${e.type.padEnd(15)} ${e.callId.slice(0, 12)}`;
+    if (e.agentId) {
+      const agent = document.createElement('span');
+      agent.className = 'agent';
+      agent.textContent = '  -> ' + e.agentId;
+      li.append(agent);
+    }
+    list.prepend(li);
+    while (list.children.length > MAX_EVENTS) list.lastElementChild.remove();
+  }
+
+  // EventSource reconnects by itself if the app restarts.
+  const source = new EventSource('/api/events');
+  source.onopen = () => { status.textContent = 'live: streaming /api/events'; refreshStats(); };
+  source.onerror = () => { status.textContent = 'disconnected, retrying...'; };
+  source.addEventListener('call', msg => { addEvent(JSON.parse(msg.data)); refreshStats(); });
+</script>
+</body>
+</html>

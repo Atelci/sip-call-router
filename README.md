@@ -18,6 +18,7 @@ flowchart LR
     R <--> Redis[("Redis<br/>agents · queue · calls · stats")]
     R -- "publish" --> E(["call-events channel"])
     E -- "subscribe" --> W["wallboard (Go)"]
+    E -- "SSE /api/events" --> B["browser page"]
     W -- "read counters" --> Redis
 ```
 
@@ -71,6 +72,10 @@ docker compose run --rm wallboard
 It shows calls waiting, calls active, free agents, average wait, each agent's status and the latest events.
 It only subscribes to `call-events` and reads Redis; it never calls the Java service.
 
+Or open **http://localhost:8080/** for the same view in a browser. The page listens to `GET /api/events`, a
+Server-Sent Events stream that forwards every `call-events` message (`curl -N localhost:8080/api/events` shows the
+raw stream).
+
 ## Demo script
 
 ```bash
@@ -97,7 +102,8 @@ src/main/java/io/github/atelci/callrouter/
   sip/SipServer.java          SIP UAS: maps SIP requests to routing calls and decisions to SIP responses
   call/CallRouter.java        routing logic (connect / queue / reject / drain queue)
   agent/AgentService.java     agent state in Redis
-  api/                        REST endpoints
+  api/                        REST endpoints, plus EventStreamController (SSE /api/events)
+src/main/resources/static/    index.html: live browser view of the event stream (plain JS, no build step)
   config/                     properties, Redis pub/sub listener
 src/main/resources/redis/     Lua script that pairs a queued call with a free agent atomically
 simulator/callgen.py          SIP caller simulator (standard library only)
@@ -151,6 +157,16 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   Maven, and the container log has no errors or warnings. No code changes were needed. Added a `.dockerignore`
   so the build context no longer ships `target/` (36 MB) and `.git`. One gotcha: after a container restart, wait
   for `SIP server listening` in the logs before calling, or the first INVITEs go nowhere.
+- SSE endpoint `/api/events` (`EventStreamController`, Spring MVC `SseEmitter`, no new dependency): the existing
+  Redis listener container forwards each `call-events` message to every open stream, so a browser on any instance
+  sees all instances' events. `index.html` at `/` shows live counters (from `/api/stats`) and recent events.
+  Checked with `curl -N` (6 events for 2 calls) and in a browser during a 10-call run, including the page
+  reconnecting on its own after an app restart. Three things fixed after trying it:
+  - the event columns did not line up (HTML collapses the padding spaces), so the list now uses `white-space: pre`;
+  - with no calls running, an opened page sat at "connecting": nothing was written until the first event, so the
+    response headers were never flushed. The endpoint now sends an SSE comment (`:connected`) right away;
+  - reloading the page while events flowed logged an ERROR stack trace (Tomcat reporting the closed connection).
+    A small `@ExceptionHandler` in the controller treats a disconnected browser as normal.
 
 ## Next steps
 
