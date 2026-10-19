@@ -107,7 +107,12 @@ simulator/callgen.py          SIP caller simulator (standard library only)
   - Added the Maven wrapper (`mvnw`, `mvnw.cmd`).
   - A 10-caller run against 3 agents and queue size 5 gave 3 connected right away, 5 queued (FIFO) and then
     connected as agents freed up, and 2 rejected with 486. A short `--patience` run checked CANCEL -> 487.
-  - `mvn verify` has no tests to run yet; Testcontainers tests for `CallRouter` come next.
+- Integration tests for `CallRouter` (`CallRouterTest`): real Redis via Testcontainers (`redis:7-alpine`) and a
+  fake `CallSignaling`, wired by hand without a Spring context so the SIP stack never binds UDP 5060. Covers
+  longest-idle agent first, FIFO queue, queue full -> rejected, BYE frees the agent and drains the queue, CANCEL
+  removes a queued call. Fixed by hand: the Testcontainers version Spring Boot 3.5.6 manages (1.21.3) talks
+  Docker API 1.32, which Docker Engine 29 refuses ("Could not find a valid Docker environment"); pinning
+  `testcontainers.version` to 1.21.4 fixed it. The tests passed on the first run after that.
 
 ## Next steps
 

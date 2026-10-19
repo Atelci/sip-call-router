@@ -31,16 +31,18 @@ mvn verify                                            # build + tests
 
 ## Current status
 
-- `mvn verify` passes (no tests yet) and the end-to-end demo with `callgen.py` works against the real app:
+- `mvn verify` passes (5 Testcontainers tests for `CallRouter`) and the end-to-end demo with `callgen.py` works against the real app:
   connect, FIFO queue, 486 when full, BYE drains queue, CANCEL -> 487. Maven wrapper is in the repo.
 - On this Windows machine the default `java` is 1.8: set `JAVA_HOME="C:\Program Files\Java\jdk-21.0.12"`.
+- Testcontainers is pinned to 1.21.4 in the pom: Boot's 1.21.3 fails against Docker Engine 29 (old API version).
 - JAIN-SIP needs the log4j 1.x API: `reload4j` provides it (old `log4j` is excluded in the pom).
 
 ## Backlog (in priority order)
 
 1. ~~Get it compiling and running end to end with `callgen.py`. Add the Maven wrapper.~~ Done 2026-10-19.
-2. Tests: `CallRouter` with a fake `CallSignaling` against real Redis via Testcontainers
-   (connect, queue FIFO order, queue full -> reject, BYE drains queue, CANCEL removes from queue).
+2. ~~Tests: `CallRouter` with a fake `CallSignaling` against real Redis via Testcontainers
+   (connect, queue FIFO order, queue full -> reject, BYE drains queue, CANCEL removes from queue).~~ Done 2026-10-19
+   (`CallRouterTest`, plain JUnit, no Spring context; needs Docker running).
 3. Make "pop queued call + claim agent" atomic in one Redis Lua script (multi-instance safe).
 4. Go extra: a small Go service that subscribes to `call-events` and prints a live wallboard
    (calls waiting, agents free, average wait).
