@@ -50,7 +50,8 @@ docker compose run --rm wallboard                     # live Go wallboard
 4. ~~Go extra: a small Go service that subscribes to `call-events` and prints a live wallboard
    (calls waiting, agents free, average wait).~~ Done 2026-10-19 (`wallboard/`, compose profile `wallboard`).
 5. Optional: SSE endpoint `/api/events` streaming `call-events` to a browser.
-6. Verify `docker compose --profile full up --build` works with SIP over UDP.
+6. ~~Verify `docker compose --profile full up --build` works with SIP over UDP.~~ Done 2026-10-19: works as-is
+   (callgen sends `rport`); added `.dockerignore`.
 
 ## Conventions
 

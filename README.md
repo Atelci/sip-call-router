@@ -52,6 +52,10 @@ docker compose up -d redis          # Redis on :6379
 ./mvnw spring-boot:run              # SIP on udp/5060, REST on :8080
 ```
 
+Or run everything in Docker (no Java needed): `docker compose --profile full up -d --build`. SIP over UDP works
+through the port mapping because `callgen.py` sends `rport` (see the comment in `docker-compose.yml`). Real SIP
+phones behind NAT may need the same.
+
 In a second terminal, place some calls (3 agents are seeded: alice, bob, carol; queue size 5):
 
 ```bash
@@ -142,6 +146,11 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   than from whatever events the wallboard happened to see. Checked against a live run: the wallboard's average wait
   (3.2s) matched `callgen.py`'s summary. One change made after watching it: the counters row was labelled "Today"
   but `stats` is all-time, so it now says "Totals".
+- Checked `docker compose --profile full up --build` with SIP over UDP (Docker Desktop on Windows): the full
+  `callgen.py` run (connect, queue, 486, BYE drain) and the CANCEL -> 487 path behave the same as the app run via
+  Maven, and the container log has no errors or warnings. No code changes were needed. Added a `.dockerignore`
+  so the build context no longer ships `target/` (36 MB) and `.git`. One gotcha: after a container restart, wait
+  for `SIP server listening` in the logs before calling, or the first INVITEs go nowhere.
 
 ## Next steps
 

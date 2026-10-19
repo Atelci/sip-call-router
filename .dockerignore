@@ -1,0 +1,8 @@
+# The app image only needs pom.xml and src/; keep the build context small.
+target/
+.git/
+.idea/
+.vscode/
+simulator/
+wallboard/
+*.log

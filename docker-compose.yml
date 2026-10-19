@@ -15,8 +15,9 @@ services:
       REDIS_ADDR: redis:6379
 
   # Optional: run the app in Docker too (`docker compose --profile full up --build`).
-  # SIP over UDP through Docker's port mapping can be fiddly (NAT rewrites the source),
-  # so for the demo the recommended setup is Redis here + the app via `mvn spring-boot:run`.
+  # SIP over UDP works through the port mapping (checked with Docker Desktop on Windows): Docker rewrites
+  # the source address, but callgen.py sends `rport`, so responses go back to where the packet came from,
+  # and SIP_ADVERTISE_HOST puts 127.0.0.1:5060 in our Contact so ACK and BYE reach the mapped port.
   app:
     build: .
     profiles: ["full"]
