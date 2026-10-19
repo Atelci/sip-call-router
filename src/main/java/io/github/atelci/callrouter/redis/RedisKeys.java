@@ -10,7 +10,7 @@ package io.github.atelci.callrouter.redis;
  * queue:calls         LIST   call ids waiting for an agent (RPUSH in, LPOP out = FIFO)
  * calls:active        SET    call ids currently connected to an agent
  * call:{callId}       HASH   from, to, state, agentId, createdAt, connectedAt, waitMs (TTL after end)
- * stats               HASH   counters: total, connected, queued, rejected, abandoned, ended
+ * stats               HASH   counters: total, connected, queued, rejected, abandoned, ended, waitMsTotal
  * call-events         PUB/SUB channel with JSON call events
  * </pre>
  */

@@ -2,7 +2,7 @@
 
 A mini contact-center call router (ACD). Customers call in over **SIP**, a **Java / Spring Boot** service
 routes each call to the longest-idle agent, and calls queue in **Redis** when everyone is busy.
-A **Python** call generator simulates callers.
+A **Python** call generator simulates callers, and a **Go** wallboard shows the live numbers.
 
 Signaling only: no audio (RTP), which keeps the project small while exercising the real SIP call flow.
 
@@ -17,6 +17,8 @@ flowchart LR
     end
     R <--> Redis[("Redis<br/>agents · queue · calls · stats")]
     R -- "publish" --> E(["call-events channel"])
+    E -- "subscribe" --> W["wallboard (Go)"]
+    W -- "read counters" --> Redis
 ```
 
 | Situation | What the caller gets |
@@ -37,7 +39,7 @@ flowchart LR
 | `queue:calls` | LIST | waiting calls, FIFO (`RPUSH` / `LPOP`) |
 | `calls:active` | SET | connected calls |
 | `call:{callId}` | HASH | from, to, state, agentId, wait time; gets a 1h TTL once finished |
-| `stats` | HASH | counters via `HINCRBY` |
+| `stats` | HASH | counters via `HINCRBY`, plus `waitMsTotal` (average wait = `waitMsTotal / connected`) |
 | `call-events` | PUB/SUB | JSON event per call state change |
 
 ## Run it
@@ -55,6 +57,15 @@ In a second terminal, place some calls (3 agents are seeded: alice, bob, carol; 
 ```bash
 python3 simulator/callgen.py --calls 10 --talk 3 8 --patience 15
 ```
+
+In a third terminal, the live wallboard (built and run in Docker, so Go is not needed):
+
+```bash
+docker compose run --rm wallboard
+```
+
+It shows calls waiting, calls active, free agents, average wait, each agent's status and the latest events.
+It only subscribes to `call-events` and reads Redis; it never calls the Java service.
 
 ## Demo script
 
@@ -84,7 +95,9 @@ src/main/java/io/github/atelci/callrouter/
   agent/AgentService.java     agent state in Redis
   api/                        REST endpoints
   config/                     properties, Redis pub/sub listener
+src/main/resources/redis/     Lua script that pairs a queued call with a free agent atomically
 simulator/callgen.py          SIP caller simulator (standard library only)
+wallboard/main.go             Go terminal wallboard fed by the call-events channel (go-redis)
 ```
 
 ## Design notes
@@ -123,6 +136,12 @@ simulator/callgen.py          SIP caller simulator (standard library only)
   `LPOP` + `ZPOPMIN` (+ push back on failure). Three new tests cover drain order, an empty queue, and two router
   instances draining one queue from 8 threads (every call gets exactly one agent, no agent is used twice). The
   `callgen.py` demo gives the same results as before. No fixes by hand were needed.
+- Go wallboard (`wallboard/`): subscribes to `call-events` and redraws from Redis on every event and once a
+  second. Go was not installed on the dev machine, so it is built in the `golang:1.24-alpine` image and run via a
+  `wallboard` compose profile. Added a `waitMsTotal` counter to `stats` so the average wait comes from Redis rather
+  than from whatever events the wallboard happened to see. Checked against a live run: the wallboard's average wait
+  (3.2s) matched `callgen.py`'s summary. One change made after watching it: the counters row was labelled "Today"
+  but `stats` is all-time, so it now says "Totals".
 
 ## Next steps
 

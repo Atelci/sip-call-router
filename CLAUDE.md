@@ -10,6 +10,7 @@ as extras. Keep it small and demo-able; clarity beats features. Interview is Wed
 - JAIN-SIP reference implementation (`javax.sip:jain-sip-ri`, NIST stack), UDP only, signaling only (no RTP)
 - Redis via Spring Data Redis (`StringRedisTemplate` everywhere so keys stay readable in `redis-cli`)
 - `simulator/callgen.py`: SIP caller simulator, standard library only
+- `wallboard/`: Go terminal wallboard (go-redis), subscribes to `call-events`; built in Docker (no Go on this machine)
 
 ## Commands
 
@@ -18,6 +19,7 @@ docker compose up -d redis
 mvn spring-boot:run                                   # SIP udp/5060, REST :8080
 python3 simulator/callgen.py --calls 10 --talk 3 8   # simulate callers
 mvn verify                                            # build + tests
+docker compose run --rm wallboard                     # live Go wallboard
 ```
 
 ## Architecture
@@ -45,8 +47,8 @@ mvn verify                                            # build + tests
    (`CallRouterTest`, plain JUnit, no Spring context; needs Docker running).
 3. ~~Make "pop queued call + claim agent" atomic in one Redis Lua script (multi-instance safe).~~ Done 2026-10-19
    (`resources/redis/claim-next-call.lua`, used by `drainQueue`). The new-call path (claim or enqueue) is not atomic yet.
-4. Go extra: a small Go service that subscribes to `call-events` and prints a live wallboard
-   (calls waiting, agents free, average wait).
+4. ~~Go extra: a small Go service that subscribes to `call-events` and prints a live wallboard
+   (calls waiting, agents free, average wait).~~ Done 2026-10-19 (`wallboard/`, compose profile `wallboard`).
 5. Optional: SSE endpoint `/api/events` streaming `call-events` to a browser.
 6. Verify `docker compose --profile full up --build` works with SIP over UDP.
 

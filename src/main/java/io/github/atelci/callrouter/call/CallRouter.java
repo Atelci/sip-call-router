@@ -153,6 +153,7 @@ public class CallRouter {
                 "waitMs", String.valueOf(waitMs)));
         redis.opsForSet().add(RedisKeys.CALLS_ACTIVE, callId);
         incrementStat("connected");
+        redis.opsForHash().increment(RedisKeys.STATS, "waitMsTotal", waitMs);   // avg wait = waitMsTotal / connected
         events.publish(CallEvent.of("CALL_CONNECTED", callId, agentId, null));
         log.info("Call {} connected to agent {} after {} ms", callId, agentId, waitMs);
         return true;

@@ -4,6 +4,16 @@ services:
     ports:
       - "6379:6379"
 
+  # Go wallboard: `docker compose run --rm wallboard` (no Go install needed).
+  # It only reads Redis, so it works the same with the app run via Maven or in Docker.
+  wallboard:
+    build: ./wallboard
+    profiles: ["wallboard"]
+    depends_on:
+      - redis
+    environment:
+      REDIS_ADDR: redis:6379
+
   # Optional: run the app in Docker too (`docker compose --profile full up --build`).
   # SIP over UDP through Docker's port mapping can be fiddly (NAT rewrites the source),
   # so for the demo the recommended setup is Redis here + the app via `mvn spring-boot:run`.
