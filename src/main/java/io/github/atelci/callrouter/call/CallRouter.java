@@ -1,12 +1,15 @@
 package io.github.atelci.callrouter.call;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import io.github.atelci.callrouter.agent.AgentService;
@@ -22,14 +25,20 @@ import io.github.atelci.callrouter.redis.RedisKeys;
  *   <li>queue full             -> reject</li>
  *   <li>agent frees up         -> next queued call gets that agent</li>
  * </ul>
- * All state is in Redis. Methods are synchronized because this MVP runs as a single instance;
- * scaling out would need the claim-and-dequeue step moved into a Redis Lua script.
+ * All state is in Redis. Serving the queue (pop call + claim agent) is one atomic Lua script,
+ * so it is safe with several instances. Methods are still synchronized because the new-call path
+ * (claim agent, else check size and enqueue) is several Redis commands; see the README design notes.
  */
 @Service
 public class CallRouter {
 
     private static final Logger log = LoggerFactory.getLogger(CallRouter.class);
     private static final Duration FINISHED_CALL_TTL = Duration.ofHours(1);
+
+    /** Returns [callId, agentId] or an empty list. Raw List because RedisScript takes a Class. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static final RedisScript<List<String>> CLAIM_NEXT_CALL = (RedisScript) RedisScript.of(
+            new ClassPathResource("redis/claim-next-call.lua"), List.class);
 
     private final StringRedisTemplate redis;
     private final AgentService agents;
@@ -108,19 +117,19 @@ public class CallRouter {
         }
     }
 
-    /** Pairs queued calls with free agents until one side runs out. */
+    /**
+     * Pairs queued calls with free agents until one side runs out. Each pairing is one Lua script
+     * (claim-next-call.lua), so two router instances draining at once can never split a pair:
+     * no call is popped without an agent, and no agent is claimed without a call.
+     */
     public synchronized void drainQueue() {
-        while (agents.availableCount() > 0) {
-            String callId = redis.opsForList().leftPop(RedisKeys.CALL_QUEUE);
-            if (callId == null) {
+        while (true) {
+            List<String> pair = redis.execute(CLAIM_NEXT_CALL,
+                    List.of(RedisKeys.CALL_QUEUE, RedisKeys.AGENTS_AVAILABLE), RedisKeys.AGENT_PREFIX);
+            if (pair == null || pair.size() < 2) {
                 return;
             }
-            Optional<String> agent = agents.claimLongestIdle(callId);
-            if (agent.isEmpty()) {
-                redis.opsForList().leftPush(RedisKeys.CALL_QUEUE, callId);
-                return;
-            }
-            connect(callId, agent.get());
+            connect(pair.get(0), pair.get(1));
         }
     }
 

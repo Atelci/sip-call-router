@@ -93,8 +93,14 @@ simulator/callgen.py          SIP caller simulator (standard library only)
   so it can be tested with a fake and the SIP stack could be swapped.
 - **State in Redis, transactions in memory.** Open SIP INVITE transactions are live protocol objects, so they
   stay in the JVM; everything about the call itself is in Redis.
-- **Single instance for now.** Router methods are `synchronized`. Running several instances would need the
-  "pop call + claim agent" step as one Redis Lua script, plus sticky SIP routing.
+- **Serving the queue is atomic.** When an agent frees up, "pop the oldest call + claim the longest-idle agent +
+  mark it busy" runs as one Redis Lua script (`src/main/resources/redis/claim-next-call.lua`). With separate
+  `LPOP` and `ZPOPMIN` calls, a second instance could take the last agent in between: the popped call would
+  then have to be pushed back (losing its place, or lost entirely if the instance crashed in between).
+- **Still not fully multi-instance.** The new-call path (claim an agent, else check the queue size and enqueue)
+  is several commands, so router methods stay `synchronized`. Two instances could briefly over-fill the queue
+  by one. The fix is the same idea (one more script), plus sticky SIP routing so a call's BYE and CANCEL reach
+  the instance holding its INVITE transaction.
 
 ## Built with AI assistance
 
@@ -113,6 +119,10 @@ simulator/callgen.py          SIP caller simulator (standard library only)
   removes a queued call. Fixed by hand: the Testcontainers version Spring Boot 3.5.6 manages (1.21.3) talks
   Docker API 1.32, which Docker Engine 29 refuses ("Could not find a valid Docker environment"); pinning
   `testcontainers.version` to 1.21.4 fixed it. The tests passed on the first run after that.
+- Atomic queue draining: `CallRouter.drainQueue()` now calls `claim-next-call.lua` instead of separate
+  `LPOP` + `ZPOPMIN` (+ push back on failure). Three new tests cover drain order, an empty queue, and two router
+  instances draining one queue from 8 threads (every call gets exactly one agent, no agent is used twice). The
+  `callgen.py` demo gives the same results as before. No fixes by hand were needed.
 
 ## Next steps
 

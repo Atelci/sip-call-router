@@ -22,12 +22,13 @@ public final class RedisKeys {
     public static final String CALLS_ACTIVE = "calls:active";
     public static final String STATS = "stats";
     public static final String EVENTS_CHANNEL = "call-events";
+    public static final String AGENT_PREFIX = "agent:";
 
     private RedisKeys() {
     }
 
     public static String agent(String agentId) {
-        return "agent:" + agentId;
+        return AGENT_PREFIX + agentId;
     }
 
     public static String call(String callId) {

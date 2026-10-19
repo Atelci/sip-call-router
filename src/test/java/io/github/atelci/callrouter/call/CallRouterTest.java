@@ -3,7 +3,11 @@ package io.github.atelci.callrouter.call;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -44,7 +48,7 @@ class CallRouterTest {
 
     /** Stands in for SipServer: records which calls were answered and by whom. */
     static class FakeSignaling implements CallSignaling {
-        final List<String> answered = new ArrayList<>();
+        final List<String> answered = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public boolean answer(String callId, String agentId) {
@@ -137,6 +141,70 @@ class CallRouterTest {
 
         assertThat(callState("c1")).isEqualTo("ABANDONED");
         assertThat(redis.opsForList().range(RedisKeys.CALL_QUEUE, 0, -1)).containsExactly("c2");
+    }
+
+    @Test
+    void drainPairsOldestCallsWithLongestIdleAgents() throws InterruptedException {
+        router.onIncomingCall("c1", "caller1", "support");   // queued, no agents yet
+        router.onIncomingCall("c2", "caller2", "support");
+        freeAgent("alice");                                   // markAvailable alone does not drain
+        freeAgent("bob");
+        agents.register("carol");                             // registered but offline: never used
+
+        router.drainQueue();
+
+        assertThat(signaling.answered).containsExactly("c1->alice", "c2->bob");
+        assertThat(redis.opsForList().size(RedisKeys.CALL_QUEUE)).isZero();
+        assertThat(redis.opsForHash().get(RedisKeys.agent("bob"), "status")).isEqualTo("BUSY");
+        assertThat(redis.opsForHash().get(RedisKeys.agent("bob"), "currentCallId")).isEqualTo("c2");
+    }
+
+    @Test
+    void drainLeavesAgentFreeWhenQueueIsEmpty() throws InterruptedException {
+        freeAgent("alice");
+
+        router.drainQueue();
+
+        assertThat(signaling.answered).isEmpty();
+        assertThat(agents.availableCount()).isEqualTo(1);
+    }
+
+    /**
+     * Two router instances (as if two app servers share one Redis) drain the same queue from
+     * many threads at once. Every call must get exactly one agent and no agent may be used twice.
+     */
+    @Test
+    void twoInstancesDrainingTogetherNeverSplitOrReusePairs() throws Exception {
+        int calls = 40;
+        for (int i = 0; i < calls; i++) {
+            redis.opsForList().rightPush(RedisKeys.CALL_QUEUE, "c" + i);
+            agents.register("a" + i);
+            agents.markAvailable("a" + i);
+        }
+        FakeSignaling shared = new FakeSignaling();
+        RouterProperties props = new RouterProperties(null, calls, List.of());
+        CallEventPublisher events = new CallEventPublisher(redis, new ObjectMapper());
+        List<CallRouter> instances = List.of(
+                new CallRouter(redis, agents, events, props),
+                new CallRouter(redis, agents, events, props));
+        instances.forEach(r -> r.setSignaling(shared));
+
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        List<Future<?>> runs = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            runs.add(pool.submit(instances.get(i % 2)::drainQueue));
+        }
+        for (Future<?> run : runs) {
+            run.get();
+        }
+        pool.shutdown();
+
+        List<String> answered = shared.answered;
+        assertThat(answered).hasSize(calls);
+        assertThat(answered.stream().map(p -> p.split("->")[0]).distinct()).hasSize(calls);
+        assertThat(answered.stream().map(p -> p.split("->")[1]).distinct()).hasSize(calls);
+        assertThat(redis.opsForList().size(RedisKeys.CALL_QUEUE)).isZero();
+        assertThat(agents.availableCount()).isZero();
     }
 
     /** Registers an agent as free. The short sleep gives each agent a distinct idle-since score. */
