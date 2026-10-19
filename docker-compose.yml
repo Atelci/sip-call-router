@@ -1,0 +1,21 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Optional: run the app in Docker too (`docker compose --profile full up --build`).
+  # SIP over UDP through Docker's port mapping can be fiddly (NAT rewrites the source),
+  # so for the demo the recommended setup is Redis here + the app via `mvn spring-boot:run`.
+  app:
+    build: .
+    profiles: ["full"]
+    depends_on:
+      - redis
+    environment:
+      REDIS_HOST: redis
+      SIP_BIND_HOST: 0.0.0.0
+      SIP_ADVERTISE_HOST: 127.0.0.1
+    ports:
+      - "8080:8080"
+      - "5060:5060/udp"

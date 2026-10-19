@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: sip-call-router
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+callrouter:
+  sip:
+    bind-host: ${SIP_BIND_HOST:127.0.0.1}
+    advertise-host: ${SIP_ADVERTISE_HOST:127.0.0.1}
+    port: ${SIP_PORT:5060}
+  max-queue-size: 5
+  agents:
+    - alice
+    - bob
+    - carol
+
+logging:
+  level:
+    io.github.atelci.callrouter: INFO
+    call-events: INFO
