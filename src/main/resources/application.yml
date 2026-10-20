@@ -29,6 +29,11 @@ callrouter:
     carol: [de, billing]
 
 logging:
+  # Also written to a file so LogTailer can stream it to the browser page (console output stays as is).
+  file:
+    name: ${LOG_FILE:logs/sip-call-router.log}
+  pattern:
+    file: "%d{HH:mm:ss.SSS} %-5level [%15.15thread] %-32.32logger{30} : %msg%n"
   level:
     io.github.atelci.callrouter: INFO
     call-events: INFO

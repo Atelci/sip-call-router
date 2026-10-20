@@ -31,6 +31,7 @@ docker compose run --rm wallboard                     # live Go wallboard
 - `agent/AgentService` — agents with skills; a free agent is in ZSET `agents:available` and in `agents:available:{skill}`
   for each skill (score = idle-since). Claiming is `resources/redis/claim-agent.lua` (removes the agent from every pool).
 - `sip/SipTrace` — every SIP message in/out goes to Redis list `sip:{callId}` + channel `sip-messages` (UI ladder diagrams).
+- `logs/LogTailer` — tails `logs/sip-call-router.log` (`logging.file.name`) every 500 ms; SSE event `log`, `GET /api/logs`.
 - `simulator/` — `CallGenerator` + `SimulatedCaller`: Java port of callgen.py on virtual threads, started from the page.
 - `api/` — REST: `/api/agents`, `/api/agents/{id}/status`, `/api/queue`, `/api/calls/active`, `/api/calls/{id}/sip`,
   `/api/stats`, `POST /api/simulator/calls`; SSE `/api/events` with event types `call` and `sip` (`EventStreamController`,
@@ -64,6 +65,7 @@ docker compose run --rm wallboard                     # live Go wallboard
    (media, AI overflow, atomic new-call path) are talking points for the interview, not planned work.
 8. ~~UI: call generator on the page, live SIP ladder diagrams per call, queue view.~~ Done 2026-10-20
    (checked in Docker; the ACK for 486/487 is not drawn because JAIN-SIP absorbs it).
+9. ~~App log tail on the page.~~ Done 2026-10-20 (`LogTailer`; JAIN-SIP's log4j output is console-only).
 
 ## Conventions
 

@@ -6,3 +6,4 @@ target/
 simulator/
 wallboard/
 *.log
+/logs/

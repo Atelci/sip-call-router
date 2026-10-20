@@ -155,6 +155,25 @@
   .scenario p { margin: 2px 0 6px; color: var(--muted); }
   .scenario button { font-size: 14px; padding: 4px 10px; }
 
+  /* app log tail */
+  .logs { margin-bottom: 20px; }
+  .log-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 14px; }
+  .log-tools input[type=search] { flex: 1; min-width: 140px; padding: 5px 8px; font: inherit; color: var(--text);
+                                  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  .log-tools label { display: flex; align-items: center; gap: 5px; color: var(--text); font-size: 14px; }
+  .log-tools button { font-size: 14px; padding: 5px 12px; background: var(--soft); color: var(--text); }
+  #log { height: 300px; min-height: 120px; resize: vertical; overflow: auto; margin: 0; padding: 8px 10px;
+         background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 13px; line-height: 1.5;
+         scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  #log div { white-space: pre-wrap; word-break: break-word; }
+  #log .ts, #log .src { color: var(--muted); }
+  #log .lvl { font-weight: 600; }
+  #log .WARN .lvl, #log .WARN .msg { color: var(--warn); }
+  #log .ERROR .lvl, #log .ERROR .msg { color: var(--bad); }
+  #log .INFO .lvl { color: var(--ok); }
+  #log .DEBUG .lvl, #log .TRACE .lvl { color: var(--muted); }
+  #log .cont { color: var(--bad); padding-left: 2em; }   /* stack trace lines under an ERROR */
+
   @media (max-width: 1280px) {
     .page { grid-template-columns: minmax(0, 1fr); }
     .guide { position: static; max-height: none; overflow: visible; }
@@ -223,6 +242,16 @@
     </div>
 
     <section>
+      <section class="card logs">
+        <h2>App log <small>live tail of logs/sip-call-router.log</small></h2>
+        <div class="log-tools">
+          <input type="search" id="logFilter" placeholder="filter, e.g. CallRouter, WARN, a call id">
+          <label><input type="checkbox" id="logFollow" checked> follow</label>
+          <button type="button" id="logClear">Clear</button>
+        </div>
+        <div id="log" class="mono"><div class="empty">waiting for log lines...</div></div>
+      </section>
+
       <h2>SIP signaling <small>caller ⇄ router, per call</small></h2>
       <p class="hint">Click any arrow to see the full SIP message.</p>
       <div id="calls"><div class="card empty">No calls yet. Start some with the call generator (or run callgen.py).</div></div>
@@ -339,6 +368,10 @@
           mid-call still shows the earlier messages.</li>
       <li>Watch Redis directly: <code>redis-cli MONITOR</code>, <code>redis-cli SUBSCRIBE call-events</code>,
           <code>redis-cli LRANGE queue:calls 0 -1</code>.</li>
+      <li><b>App log</b>: the app also writes its log to <code>logs/sip-call-router.log</code>. A small tailer reads
+          what was appended every half second (like <code>tail -f</code>) and sends new lines as SSE event
+          <code>log</code>; <code>/api/logs</code> gives the last 500 lines to a freshly opened page. Type in the filter
+          to keep only matching lines (try a call id or <code>WARN</code>); scrolling up pauses follow.</li>
       <li>Signaling only: there is no audio (RTP), and the 200 OK carries no SDP.</li>
     </ul>
   </details>
@@ -629,6 +662,63 @@
     });
   }
 
+  // ------------------------------------------------------------------ app log tail
+
+  const MAX_LOG_LINES = 1000;
+  // file pattern from application.yml: "HH:mm:ss.SSS LEVEL [thread] logger : message"
+  const LOG_LINE = /^(\d\d:\d\d:\d\d\.\d{3}) (\w+)\s+\[\s*([^\]]*)\] (\S+)\s+: (.*)$/;
+  let lastLogSeq = 0, lastLevel = 'INFO';
+
+  /** Start over from the server's recent lines (page load, or the stream reconnected after a restart). */
+  async function loadLog() {
+    const lines = await getJson('/api/logs');
+    $('log').replaceChildren();
+    lastLogSeq = 0;
+    addLogLines(lines);
+  }
+
+  function addLogLines(lines) {
+    const box = $('log');
+    if (box.firstElementChild?.classList.contains('empty')) box.replaceChildren();
+    const filter = $('logFilter').value.toLowerCase();
+    for (const { seq, text } of lines) {
+      if (seq <= lastLogSeq) continue;   // already shown via /api/logs
+      lastLogSeq = seq;
+      box.append(logRow(text, filter));
+    }
+    while (box.children.length > MAX_LOG_LINES) box.firstElementChild.remove();
+    if ($('logFollow').checked) box.scrollTop = box.scrollHeight;
+  }
+
+  function logRow(text, filter) {
+    const row = el('div');
+    const m = text.match(LOG_LINE);
+    if (m) {
+      const [, time, level, thread, logger, message] = m;
+      lastLevel = level;
+      row.className = level;
+      row.append(el('span', 'ts', time + ' '), el('span', 'lvl', level.padEnd(5) + ' '),
+                 el('span', 'src', `[${thread}] ${logger} `), el('span', 'msg', message));
+    } else {
+      row.textContent = text;   // e.g. a stack trace line belonging to the line above
+      if (lastLevel === 'ERROR' || lastLevel === 'WARN') row.className = 'cont';
+    }
+    row.hidden = filter && !text.toLowerCase().includes(filter);
+    return row;
+  }
+
+  $('logFilter').addEventListener('input', () => {
+    const filter = $('logFilter').value.toLowerCase();
+    for (const row of $('log').children) row.hidden = filter && !row.textContent.toLowerCase().includes(filter);
+    if ($('logFollow').checked) $('log').scrollTop = $('log').scrollHeight;
+  });
+  $('logClear').addEventListener('click', () => $('log').replaceChildren());
+  // scrolling up to read pauses "follow"; scrolling back to the end resumes it
+  $('log').addEventListener('scroll', () => {
+    const box = $('log');
+    $('logFollow').checked = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  });
+
   // ------------------------------------------------------------------ live stream
 
   function addEvent(e) {
@@ -649,10 +739,11 @@
 
   // EventSource reconnects by itself if the app restarts.
   const source = new EventSource('/api/events');
-  source.onopen = () => { $('status').textContent = 'live: streaming /api/events'; refresh(); };
+  source.onopen = () => { $('status').textContent = 'live: streaming /api/events'; refresh(); loadLog(); };
   source.onerror = () => { $('status').textContent = 'disconnected, retrying...'; };
   source.addEventListener('call', msg => onCallEvent(JSON.parse(msg.data)));
   source.addEventListener('sip', msg => addSipMessage(JSON.parse(msg.data)));
+  source.addEventListener('log', msg => addLogLines(JSON.parse(msg.data)));
 </script>
 </body>
 </html>

@@ -101,6 +101,10 @@ Or open **http://localhost:8080/** for the browser view. It has:
 - **SIP signaling**: a ladder diagram per call (caller ⇄ router) that grows live as messages are sent and received,
   with queue positions and agent names on the arrows. Click an arrow to see the full SIP message. It shows what
   `SipServer` sees, so the ACK for a `486`/`487` is missing: JAIN-SIP absorbs it inside the INVITE transaction.
+- **App log**: a live tail of the app's own log file (`logs/sip-call-router.log`), with a filter box (a call id,
+  `WARN`, a class name) and follow mode. `LogTailer` reads what was appended every 500 ms, like `tail -f`, and
+  sends new lines over the same SSE stream; `GET /api/logs` returns the last 500 lines for a page opened later.
+  The log is per instance: the page shows the log of the instance that served it.
 - **Queues**: every queue with its fill level against `max-queue-size` and the waiting callers in order with live
   wait times, plus the connected calls (agent, wait, talk time) and each agent's status.
 
@@ -137,6 +141,7 @@ src/main/java/io/github/atelci/callrouter/
   agent/AgentService.java     agent state and skill pools in Redis
   sip/SipTrace.java           records every SIP message (Redis list + sip-messages channel) for the UI diagrams
   api/                        REST endpoints, plus EventStreamController (SSE /api/events)
+  logs/LogTailer.java         tails the app's log file and streams new lines to the page (SSE event "log")
   simulator/                  CallGenerator + SimulatedCaller: SIP callers started from the browser page
   config/                     properties, Redis pub/sub listener
 src/main/resources/redis/     claim-agent.lua: claims an agent from every pool at once (and pops a queued call)
@@ -232,6 +237,13 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   agents, and what happens under the hood. Four scenario buttons (normal day, overflow → 486, CANCEL → 487, skill
   beats idle time) fill in the generator form. Checked in the browser: the skill scenario left bob free with three
   billing calls waiting; the overflow and CANCEL behaviour had been checked earlier with similar settings.
+- App log on the page: asked to show the Java logs "by tailing the app log", so the app now also writes
+  `logs/sip-call-router.log` (compact pattern set in `application.yml`; console output unchanged), and `LogTailer`
+  polls it every 500 ms with a `RandomAccessFile`: it only takes complete lines, starts over if the file shrinks
+  (rotation), and never logs anything itself so it cannot feed on its own output. Lines carry a sequence number so
+  a page that loads `/api/logs` while live lines arrive shows no duplicates. Checked in Docker during a 12-caller run
+  (connect, queue, CANCEL lines all stream in, filter and reload work). No fixes by hand were needed. Not covered:
+  JAIN-SIP's own log4j output still goes only to the console (it is WARN-level and normally silent).
 
 ## Next steps
 

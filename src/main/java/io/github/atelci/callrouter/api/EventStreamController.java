@@ -15,6 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 /**
  * Streams two Redis channels to browsers as Server-Sent Events:
  * {@code call-events} as SSE event "call" and {@code sip-messages} as SSE event "sip".
+ * {@code LogTailer} also sends this instance's new log lines as SSE event "log".
  *
  * <pre>
  * router --PUBLISH--> Redis call-events / sip-messages --(listener in RedisConfig)--> every open GET /api/events
