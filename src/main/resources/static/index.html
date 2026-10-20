@@ -220,8 +220,8 @@
         <form id="generator">
           <label>Callers <input type="number" name="calls" value="10" min="1" max="50"></label>
           <label>Seconds between callers <input type="number" name="interval" value="0.5" min="0" step="0.1"></label>
-          <label>Talk min (s) <input type="number" name="talkMin" value="3" min="0" step="0.5"></label>
-          <label>Talk max (s) <input type="number" name="talkMax" value="8" min="0" step="0.5"></label>
+          <label>Shortest talk, seconds <input type="number" name="talkMin" value="3" min="0" step="0.5"></label>
+          <label>Longest talk, seconds <input type="number" name="talkMax" value="8" min="0" step="0.5"></label>
           <label>Patience in queue (s) <input type="number" name="patience" value="20" min="1" step="1"></label>
           <fieldset>
             <legend>Dial (one picked at random per caller)</legend>
@@ -285,8 +285,9 @@
     <dl>
       <dt>Callers</dt><dd>how many calls to place (1–50)</dd>
       <dt>Seconds between</dt><dd>gap between new callers; 0.1 makes a burst</dd>
-      <dt>Talk min / max</dt><dd>a connected caller talks for a random time in this range, then hangs up (BYE)</dd>
-      <dt>Patience</dt><dd>a queued caller gives up (CANCEL) after this many seconds</dd>
+      <dt>Shortest / longest talk</dt><dd>a connected caller talks for a random number of seconds in this range,
+        then hangs up (BYE). Kept short so a demo finishes in under a minute</dd>
+      <dt>Patience in queue</dt><dd>a queued caller gives up (CANCEL) after this many seconds</dd>
       <dt>Dial</dt><dd>each caller dials one of the ticked users at random. The dialed user is the skill:
         <code>sip:billing@router</code> needs a billing agent; <code>support</code> means any agent</dd>
     </dl>
