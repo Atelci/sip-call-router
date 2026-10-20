@@ -1,0 +1,31 @@
+# Render Blueprint: the app (built from the Dockerfile) plus a Render Key Value (Redis) instance.
+# In the Render dashboard: New > Blueprint, pick this repo. See "Deploy to Render" in README.md.
+#
+# Only HTTP is public. That is enough for the browser demo: the page's call generator sends its SIP over UDP to
+# 127.0.0.1 inside the same container, so SIP stays on the default bind host and udp/5060 is never exposed.
+services:
+  - type: web
+    name: sip-call-router
+    runtime: docker
+    plan: free                    # sleeps after ~15 min idle; open the URL a minute before you need it
+    region: frankfurt             # must match the Key Value region (they talk over Render's private network)
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: PORT                 # tells Render which port the app listens on (server.port is 8080)
+        value: "8080"
+      - key: SPRING_DATA_REDIS_URL  # Spring Boot reads this as spring.data.redis.url, which overrides host/port
+        fromService:
+          type: keyvalue
+          name: sip-call-router-redis
+          property: connectionString
+      - key: JAVA_TOOL_OPTIONS    # the free plan has 512 MB; let the heap use most of it
+        value: "-XX:MaxRAMPercentage=75"
+
+  - type: keyvalue
+    name: sip-call-router-redis
+    plan: free
+    region: frankfurt
+    ipAllowList: []               # no access from outside Render; the app connects over the private network
+    # Only keys with a TTL (the sip:{callId} traces) may be evicted when memory runs out, never agents or queues.
+    maxmemoryPolicy: volatile-lru

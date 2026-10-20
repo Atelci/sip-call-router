@@ -66,6 +66,8 @@ docker compose run --rm wallboard                     # live Go wallboard
 8. ~~UI: call generator on the page, live SIP ladder diagrams per call, queue view.~~ Done 2026-10-20
    (checked in Docker; the ACK for 486/487 is not drawn because JAIN-SIP absorbs it).
 9. ~~App log tail on the page.~~ Done 2026-10-20 (`LogTailer`; JAIN-SIP's log4j output is console-only).
+10. Public demo on Render: `render.yaml` added 2026-10-20 (free web service + Key Value, Redis via
+    `SPRING_DATA_REDIS_URL`). Checked Render-style in local Docker; not yet deployed (user does that in Render).
 
 ## Conventions
 

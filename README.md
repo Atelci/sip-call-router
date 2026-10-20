@@ -112,6 +112,26 @@ The page listens to `GET /api/events`, a Server-Sent Events stream with two even
 `call-events` message) and `sip` (every `sip-messages` message). `curl -N localhost:8080/api/events` shows the raw
 stream; `curl -s localhost:8080/api/calls/{callId}/sip` returns one call's SIP history.
 
+## Deploy to Render
+
+The app is a long-running JVM with Redis, a UDP socket and an SSE stream, so static hosts such as Netlify cannot
+run it. Any container host can: `render.yaml` is a Render Blueprint for the Docker image plus a Render Key Value
+(Redis) instance, both on the free plan.
+
+1. Push the repo to GitHub. In the Render dashboard: **New > Blueprint**, pick the repo, **Apply**.
+2. Wait for the first build (a few minutes), then open `https://sip-call-router-xxxx.onrender.com/`.
+
+Only HTTP is public, and that is all the browser page needs: its call generator sends SIP over UDP to `127.0.0.1`
+inside the container. `callgen.py` and real SIP phones cannot reach the hosted copy; use the local setup for those.
+
+Things to know before sharing the link:
+
+- The free web service sleeps after about 15 minutes without traffic and takes about a minute to wake up. Open
+  the page shortly before a demo (or switch the service to the Starter plan).
+- Everyone who opens the link shares the same agents and queues (queue size 5), and anyone can start calls.
+  Suspend the service in the dashboard when the demo is over.
+- The free Key Value instance keeps data in memory only, so a restart starts from a clean state.
+
 ## Demo script
 
 ```bash
@@ -244,6 +264,14 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   a page that loads `/api/logs` while live lines arrive shows no duplicates. Checked in Docker during a 12-caller run
   (connect, queue, CANCEL lines all stream in, filter and reload work). No fixes by hand were needed. Not covered:
   JAIN-SIP's own log4j output still goes only to the console (it is WARN-level and normally silent).
+- Hosting for the interview: asked about Netlify; Claude Code pointed out it only serves static files and short
+  functions, and suggested Render instead, since the page's generator keeps SIP inside the container and only HTTP
+  has to be public. `render.yaml` adds the Docker web service and a Key Value instance. Render only exposes the
+  Redis connection string, so the app gets it as `SPRING_DATA_REDIS_URL` (no code change; Spring Boot's URL
+  property overrides host and port). Checked locally the way Render runs it: the image in a 512 MB container
+  with `REDIS_HOST` pointing nowhere and Redis only via the URL, no UDP port published. Health was `UP`, and a
+  10-call run from the generator gave 3 connected, 5 queued and drained, 2 rejected, at about 240 MB used. Not
+  checked on Render itself (needs the account).
 
 ## Next steps
 
