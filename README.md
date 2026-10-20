@@ -198,7 +198,8 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   every pool, a freed agent takes the longest-waiting call it can handle, CANCEL from a skill queue. Checked end to
   end with a 12-caller mixed run: every call reached an agent with its skill. Fixed by hand: one of the new tests
   was wrong (it expected a call for a not-yet-known skill to queue, but the router correctly treats it as general
-  and connects it), so it was split into two clearer tests.
+  and connects it), so it was split into two clearer tests. Re-checked in Docker afterwards
+  (`docker compose --profile full up -d --build`): default, mixed-skills and CANCEL runs all behave the same.
 
 ## Next steps
 

@@ -56,7 +56,7 @@ docker compose run --rm wallboard                     # live Go wallboard
 5. ~~Optional: SSE endpoint `/api/events` streaming `call-events` to a browser.~~ Done 2026-10-19
    (page at http://localhost:8080/).
 6. ~~Verify `docker compose --profile full up --build` works with SIP over UDP.~~ Done 2026-10-19: works as-is
-   (callgen sends `rport`); added `.dockerignore`.
+   (callgen sends `rport`); added `.dockerignore`. Re-checked with skills routing 2026-10-20.
 7. ~~Skills-based routing (README "Next steps").~~ Done 2026-10-20. The rest of "Next steps" in README.md
    (media, AI overflow, atomic new-call path) are talking points for the interview, not planned work.
 
