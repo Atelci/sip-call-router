@@ -227,6 +227,11 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   CANCEL → `487` all draw correctly, and a page opened mid-call loads the earlier messages from Redis.
   Nothing needed fixing by hand. One thing found while testing: the caller's ACK for a `486`/`487` never shows,
   because JAIN-SIP absorbs it in the INVITE transaction; that is documented rather than worked around.
+- "How to use" guide on the page, in a sticky column in the right margin: generator fields, how to read the SIP
+  diagram (colour legend, what each message means, which headers to look at), the routing rules, curl commands for
+  agents, and what happens under the hood. Four scenario buttons (normal day, overflow → 486, CANCEL → 487, skill
+  beats idle time) fill in the generator form. Checked in the browser: the skill scenario left bob free with three
+  billing calls waiting; the overflow and CANCEL behaviour had been checked earlier with similar settings.
 
 ## Next steps
 

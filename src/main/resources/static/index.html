@@ -21,91 +21,92 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
-         font: 15px/1.4 system-ui, sans-serif; }
-  main { max-width: 1240px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; }
-  h2 small { color: var(--muted); font-weight: normal; font-size: 12px; }
-  #status { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+         font: 17px/1.45 system-ui, sans-serif; }
+  .page { display: grid; grid-template-columns: minmax(0, 1300px) 480px; gap: 24px; justify-content: center; }
+  main { min-width: 0; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; }
+  h2 small { color: var(--muted); font-weight: normal; font-size: 14px; }
+  #status { color: var(--muted); font-size: 15px; margin-bottom: 20px; }
   .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
   .muted { color: var(--muted); }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .tile, .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
   .tile { padding: 12px 14px; }
-  .tile b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
-  .tile span { color: var(--muted); font-size: 13px; }
+  .tile b { display: block; font-size: 34px; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--muted); font-size: 15px; }
 
-  .layout { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .layout { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 20px; align-items: start; }
   @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
-  .side { display: grid; gap: 20px; }
+  .side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }   /* minmax: long event lines must not widen the column */
   .card { padding: 14px; }
 
   /* call generator */
-  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
-  label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
-  input[type=number] { width: 100%; padding: 6px 8px; font: inherit; font-size: 14px; color: var(--text);
+  form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 12px; }
+  label { display: grid; gap: 3px; min-width: 0; font-size: 14px; color: var(--muted); }
+  input[type=number] { width: 100%; min-width: 0; padding: 6px 8px; font: inherit; font-size: 16px; color: var(--text);
                        background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
   fieldset { grid-column: 1 / -1; border: 0; margin: 0; padding: 0; }
-  legend { font-size: 12px; color: var(--muted); padding: 0; margin-bottom: 4px; }
+  legend { font-size: 14px; color: var(--muted); padding: 0; margin-bottom: 4px; }
   .skills { display: flex; flex-wrap: wrap; gap: 6px; }
-  .skills label { display: flex; align-items: center; gap: 5px; color: var(--text); font-size: 13px;
+  .skills label { display: flex; align-items: center; gap: 5px; color: var(--text); font-size: 15px;
                   border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 7px; cursor: pointer; }
   .form-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
-  button { font: inherit; font-size: 14px; font-weight: 600; padding: 7px 16px; border: 0; border-radius: 6px;
+  button { font: inherit; font-size: 16px; font-weight: 600; padding: 7px 16px; border: 0; border-radius: 6px;
            background: var(--accent); color: #fff; cursor: pointer; }
   button:disabled { opacity: .6; cursor: default; }
-  #genResult { font-size: 13px; color: var(--muted); }
+  #genResult { font-size: 15px; color: var(--muted); }
 
   /* queues, connected calls, agents */
   .queue { padding: 8px 0; border-top: 1px solid var(--line); }
   .queue:first-of-type { border-top: 0; padding-top: 0; }
-  .queue-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+  .queue-head { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; }
   .queue-head b { min-width: 64px; }
   .meter { flex: 1; height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; }
   .meter i { display: block; height: 100%; background: var(--warn); transition: width .3s; }
   .meter.full i { background: var(--bad); }
-  .slots { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
-  .chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--soft); white-space: nowrap; }
+  .slots { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+  .chip { font-size: 14px; padding: 3px 8px; border-radius: 999px; background: var(--soft); white-space: nowrap; }
   .chip .pos { color: var(--muted); margin-right: 4px; }
-  .empty { color: var(--muted); font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; font-weight: normal; color: var(--muted); font-size: 12px; padding: 0 6px 4px 0; }
+  .empty { color: var(--muted); font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font-weight: normal; color: var(--muted); font-size: 14px; padding: 0 6px 4px 0; }
   td { padding: 5px 6px 5px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-  .agent { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin: 0 12px 6px 0; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .agent { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; margin: 0 12px 6px 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
   .AVAILABLE .dot { background: var(--ok); }
   .BUSY .dot { background: var(--warn); }
 
   /* SIP ladder diagrams */
-  #calls { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+  #calls { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(310px, 100%), 1fr)); gap: 12px; }
   .call { padding: 12px 12px 8px; transition: opacity .6s; }
   .call.done { opacity: .55; }
   .call.leaving { opacity: 0; }
-  .call-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
-  .call-head b { font-size: 14px; }
-  .badge { font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 999px;
+  .call-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; margin-bottom: 8px; }
+  .call-head b { font-size: 16px; }
+  .badge { font-size: 13px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 999px;
            background: var(--soft); color: var(--muted); margin-left: auto; }
   .badge.QUEUED { color: var(--warn); }
   .badge.CONNECTED { color: var(--ok); }
   .badge.REJECTED, .badge.ABANDONED { color: var(--bad); }
-  .lanes { display: flex; justify-content: space-between; margin-left: 46px; font-size: 11px; color: var(--muted);
+  .lanes { display: flex; justify-content: space-between; margin-left: 56px; font-size: 13px; color: var(--muted);
            text-transform: uppercase; letter-spacing: .05em; }
   .lanes span { width: 20%; text-align: center; }
-  .rows { position: relative; margin-left: 46px; padding: 4px 0 6px; }
+  .rows { position: relative; margin-left: 56px; padding: 4px 0 6px; }
   .rows::before, .rows::after { content: ''; position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); }
   .rows::before { left: 10%; }
   .rows::after { right: 10%; }
   .msg { position: relative; }
-  .msg .t { position: absolute; left: -46px; width: 40px; top: 6px; text-align: right; font-size: 10px;
+  .msg .t { position: absolute; left: -56px; width: 50px; top: 8px; text-align: right; font-size: 12px;
             color: var(--muted); font-variant-numeric: tabular-nums; }
-  .arrow { position: relative; display: block; width: 80%; margin: 0 10%; height: 26px; padding: 0;
+  .arrow { position: relative; display: block; width: 80%; margin: 0 10%; height: 32px; padding: 0;
            background: none; border-radius: 0; color: var(--accent); cursor: pointer; font-weight: normal; }
   .arrow::before { content: ''; position: absolute; left: 0; right: 0; bottom: 6px; border-top: 1.5px solid currentColor; }
   .arrow::after { content: ''; position: absolute; bottom: 2px; border: 4.5px solid transparent; }
   .in .arrow::after { right: -1px; border-left: 8px solid currentColor; border-right-width: 0; }
   .out .arrow::after { left: -1px; border-right: 8px solid currentColor; border-left-width: 0; }
-  .arrow .label { position: absolute; left: 0; right: 0; top: 1px; text-align: center; font-size: 12px;
+  .arrow .label { position: absolute; left: 0; right: 0; top: 1px; text-align: center; font-size: 14px;
                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .arrow .label small { color: var(--muted); }
   .msg.r1xx .arrow { color: var(--muted); }
@@ -113,18 +114,61 @@
   .msg.rerr .arrow { color: var(--bad); }
   .msg.new { animation: flash 1s ease-out; }
   @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } to { background: transparent; } }
-  pre.raw { margin: 2px 0 8px; padding: 8px; font-size: 11px; line-height: 1.45; background: var(--soft);
+  pre.raw { margin: 2px 0 8px; padding: 8px; font-size: 13px; line-height: 1.45; background: var(--soft);
             border-radius: 6px; white-space: pre-wrap; word-break: break-all; color: var(--text); }
-  .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
+  .hint { color: var(--muted); font-size: 14px; margin: -4px 0 10px; }
 
   ol { list-style: none; margin: 0; padding: 0; }
-  #events li { padding: 4px 0; border-top: 1px solid var(--line); font-size: 12px; white-space: pre;
+  #events li { padding: 4px 0; border-top: 1px solid var(--line); font-size: 14px; white-space: pre;
                overflow: hidden; text-overflow: ellipsis; }
   #events li:first-child { border-top: 0; }
   #events .agent-id { color: var(--accent); }
+
+  /* how-to-use guide in the right margin */
+  .guide { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; font-size: 15px;
+           line-height: 1.5; padding: 14px 18px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  .guide::-webkit-scrollbar { width: 8px; background: transparent; }
+  .guide::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+  .guide h2 { margin-bottom: 4px; }
+  .guide > p { margin: 0 0 8px; color: var(--muted); }
+  .guide details { border-top: 1px solid var(--line); padding: 8px 0; }
+  .guide summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+  .guide details > :not(summary) { margin: 8px 0 0; }
+  .guide ul, .guide ol { padding-left: 18px; list-style: disc; }
+  .guide li { margin: 3px 0; }
+  .guide code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px;
+                background: var(--soft); padding: 0 4px; border-radius: 4px; word-break: break-word; }
+  .guide dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
+  .guide dt { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; white-space: nowrap; }
+  .guide dd { margin: 0; color: var(--muted); }
+  .legend { display: grid; gap: 4px; }
+  .legend span { display: flex; align-items: center; gap: 8px; }
+  .legend i { flex: none; width: 34px; border-top: 2px solid currentColor; position: relative; }
+  .legend i::after { content: ''; position: absolute; right: -2px; top: -5px; border: 4px solid transparent;
+                     border-left: 7px solid currentColor; border-right-width: 0; }
+  .legend .c-req i { color: var(--accent); }
+  .legend .c-1xx i { color: var(--muted); }
+  .legend .c-2xx i { color: var(--ok); }
+  .legend .c-err i { color: var(--bad); }
+  .scenario { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-top: 8px; }
+  .scenario b { display: block; }
+  .scenario p { margin: 2px 0 6px; color: var(--muted); }
+  .scenario button { font-size: 14px; padding: 4px 10px; }
+
+  @media (max-width: 1280px) {
+    .page { grid-template-columns: minmax(0, 1fr); }
+    .guide { position: static; max-height: none; overflow: visible; }
+  }
+  @media (max-width: 600px) {
+    body { padding: 16px; }
+    .guide dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .guide dd { margin-bottom: 6px; }
+    table { font-size: 14px; }
+  }
 </style>
 </head>
 <body>
+<div class="page">
 <main>
   <h1>Call Router Live</h1>
   <div id="status">connecting...</div>
@@ -185,6 +229,121 @@
     </section>
   </div>
 </main>
+
+<aside class="card guide" aria-label="How to use">
+  <h2>How to use</h2>
+  <p>A tiny contact-center call router: callers dial in over SIP, Java routes each call to an agent with the right
+     skill, and all routing state lives in Redis. Everything on this page updates live.</p>
+
+  <details>
+    <summary>1. Start some calls</summary>
+    <p>The <b>Call generator</b> starts simulated callers <i>inside</i> the app. Each one is a real SIP client
+       sending UDP packets to port 5060, exactly like an external phone or <code>callgen.py</code>.</p>
+    <dl>
+      <dt>Callers</dt><dd>how many calls to place (1–50)</dd>
+      <dt>Seconds between</dt><dd>gap between new callers; 0.1 makes a burst</dd>
+      <dt>Talk min / max</dt><dd>a connected caller talks for a random time in this range, then hangs up (BYE)</dd>
+      <dt>Patience</dt><dd>a queued caller gives up (CANCEL) after this many seconds</dd>
+      <dt>Dial</dt><dd>each caller dials one of the ticked users at random. The dialed user is the skill:
+        <code>sip:billing@router</code> needs a billing agent; <code>support</code> means any agent</dd>
+    </dl>
+  </details>
+
+  <details>
+    <summary>2. Read the SIP diagram</summary>
+    <p>Each card is one call. The left line is the caller, the right line is the router. Requests go
+       left → right and responses come back right → left. The newest message is at the bottom, with the
+       time since the INVITE on the left.</p>
+    <div class="legend">
+      <span class="c-req"><i></i>request from the caller (INVITE, ACK, BYE, CANCEL)</span>
+      <span class="c-1xx"><i></i>1xx provisional: still working on it</span>
+      <span class="c-2xx"><i></i>2xx success</span>
+      <span class="c-err"><i></i>4xx failure: rejected or cancelled</span>
+    </div>
+    <dl style="margin-top: 10px">
+      <dt>INVITE</dt><dd>caller wants to start a call</dd>
+      <dt>100 Trying</dt><dd>router got it; stops the caller retransmitting over UDP</dd>
+      <dt>182 Queued</dt><dd>no free agent with the skill; <code>pos N</code> is the place in line</dd>
+      <dt>180 Ringing</dt><dd>an agent was claimed for this call</dd>
+      <dt>200 OK</dt><dd>connected; the small text is the agent (header <code>X-Agent-Id</code>)</dd>
+      <dt>ACK</dt><dd>caller confirms the 200 OK: the INVITE / 200 OK / ACK handshake is complete</dd>
+      <dt>BYE, 200 OK</dt><dd>caller hangs up; the agent is freed and takes the next waiting call</dd>
+      <dt>486 Busy Here</dt><dd>the queue for that skill is full</dd>
+      <dt>CANCEL</dt><dd>caller gave up while queued: 200 OK for the CANCEL, then 487 for the INVITE</dd>
+    </dl>
+    <p><b>Click any arrow</b> to see the full message. Worth a look: <code>Via</code> (with <code>rport</code>),
+       the <code>From</code> / <code>To</code> tags (they identify the dialog), <code>Call-ID</code>,
+       <code>CSeq</code>, and our own <code>X-Queue-Position</code> / <code>X-Agent-Id</code>.</p>
+    <p class="muted">The ACK after a 486/487 isn't drawn: the SIP stack absorbs it inside the INVITE
+       transaction before our code sees it.</p>
+  </details>
+
+  <details>
+    <summary>3. Queues, calls and agents</summary>
+    <ul>
+      <li>There is one FIFO queue per skill, plus <b>general</b>. The bar shows how full a queue is against
+          <code>max-queue-size</code>; the chips are the waiting callers in order, with a live wait time.</li>
+      <li>A new call goes to the <b>longest-idle</b> free agent with the skill. If there is none, it waits in that
+          skill's queue. If the queue is full, it gets 486.</li>
+      <li>When an agent frees up, it takes the <b>longest-waiting call it can handle</b>, across all its skills.</li>
+      <li>Agent dots: green = available, amber = busy (on a call), grey = offline.
+          alice <code>en, billing</code>, bob <code>en</code>, carol <code>de, billing</code>.</li>
+      <li>Claiming an agent is one atomic Redis Lua script, so two router instances can't hand out the same
+          agent twice.</li>
+    </ul>
+  </details>
+
+  <details>
+    <summary>4. Try these scenarios</summary>
+    <div class="scenario">
+      <b>Normal day</b>
+      <p>10 mixed callers: some connect at once, some queue and connect as agents free up.</p>
+      <button type="button" data-preset='{"calls":10,"interval":0.5,"talkMin":3,"talkMax":8,"patience":20,"skills":["support","en","de","billing"]}'>Load</button>
+    </div>
+    <div class="scenario">
+      <b>Queue overflow → 486</b>
+      <p>A burst of 20 general calls with long talks fills the general queue (max 5); the rest are rejected.</p>
+      <button type="button" data-preset='{"calls":20,"interval":0.1,"talkMin":8,"talkMax":10,"patience":30,"skills":["support"]}'>Load</button>
+    </div>
+    <div class="scenario">
+      <b>Impatient callers → CANCEL / 487</b>
+      <p>Only carol speaks German. With 3s patience, the later <code>de</code> callers hang up while queued.</p>
+      <button type="button" data-preset='{"calls":6,"interval":0.3,"talkMin":8,"talkMax":10,"patience":3,"skills":["de"]}'>Load</button>
+    </div>
+    <div class="scenario">
+      <b>Skill beats idle time</b>
+      <p>Billing calls only go to alice and carol. bob stays free even though billing callers are waiting.</p>
+      <button type="button" data-preset='{"calls":5,"interval":0.3,"talkMin":6,"talkMax":8,"patience":20,"skills":["billing"]}'>Load</button>
+    </div>
+    <p>Load fills in the form; then press <b>Start calls</b>.</p>
+  </details>
+
+  <details>
+    <summary>5. Change agents (terminal)</summary>
+    <p>Take bob offline, then send the same call with <code>AVAILABLE</code>. He picks up a waiting call
+       immediately:</p>
+    <p><code>curl -X POST localhost:8080/api/agents/bob/status -H 'Content-Type: application/json' -d '{"status":"OFFLINE"}'</code></p>
+    <p>Add a new German agent, then make dave <code>AVAILABLE</code> the same way:</p>
+    <p><code>curl -X POST "localhost:8080/api/agents/dave?skills=de"</code></p>
+  </details>
+
+  <details>
+    <summary>6. Under the hood</summary>
+    <ul>
+      <li>The page listens to <code>/api/events</code> (Server-Sent Events). <code>call</code> events come from the
+          Redis channel <code>call-events</code>, <code>sip</code> events from <code>sip-messages</code>, so the
+          page sees the calls of every app instance.</li>
+      <li>The panels re-read <code>/api/stats</code>, <code>/api/queue</code>, <code>/api/calls/active</code> and
+          <code>/api/agents</code> after each event.</li>
+      <li>A call's SIP history is the Redis list <code>sip:{callId}</code> (kept for 1h), so a page opened
+          mid-call still shows the earlier messages.</li>
+      <li>Watch Redis directly: <code>redis-cli MONITOR</code>, <code>redis-cli SUBSCRIBE call-events</code>,
+          <code>redis-cli LRANGE queue:calls 0 -1</code>.</li>
+      <li>Signaling only: there is no audio (RTP), and the 200 OK carries no SDP.</li>
+    </ul>
+  </details>
+</aside>
+</div>
 
 <script>
   const $ = id => document.getElementById(id);
@@ -457,6 +616,17 @@
     if (!line) return null;
     const value = line.slice(name.length + 1).trim();
     return name === 'From' ? (value.match(/<([^>]+)>/) || [, value])[1] : value;
+  }
+
+  // "Try these scenarios" buttons in the guide fill in the generator form
+  for (const button of document.querySelectorAll('[data-preset]')) {
+    button.addEventListener('click', () => {
+      const preset = JSON.parse(button.dataset.preset), form = $('generator');
+      for (const name of ['calls', 'interval', 'talkMin', 'talkMax', 'patience']) form.elements[name].value = preset[name];
+      for (const box of form.querySelectorAll('input[name=skills]')) box.checked = preset.skills.includes(box.value);
+      $('genResult').textContent = 'scenario loaded, press Start calls';
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
   }
 
   // ------------------------------------------------------------------ live stream
