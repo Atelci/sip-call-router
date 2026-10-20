@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import javax.sip.DialogTerminatedEvent;
 import javax.sip.IOExceptionEvent;
+import javax.sip.InvalidArgumentException;
 import javax.sip.ListeningPoint;
 import javax.sip.RequestEvent;
 import javax.sip.ResponseEvent;
@@ -69,6 +70,7 @@ public class SipServer implements SipListener, CallSignaling {
     }
 
     private final CallRouter router;
+    private final SipTrace trace;
     private final RouterProperties.Sip config;
     private final Map<String, PendingInvite> pending = new ConcurrentHashMap<>();
 
@@ -78,8 +80,9 @@ public class SipServer implements SipListener, CallSignaling {
     private HeaderFactory headerFactory;
     private ContactHeader contact;
 
-    public SipServer(CallRouter router, RouterProperties props) {
+    public SipServer(CallRouter router, SipTrace trace, RouterProperties props) {
         this.router = router;
+        this.trace = trace;
         this.config = props.sip();
     }
 
@@ -123,16 +126,15 @@ public class SipServer implements SipListener, CallSignaling {
     @Override
     public void processRequest(RequestEvent event) {
         Request request = event.getRequest();
+        trace.incoming(request);
         try {
             switch (request.getMethod()) {
                 case Request.INVITE -> handleInvite(event);
                 case Request.ACK -> log.debug("ACK for {}", callId(request));
                 case Request.BYE -> handleBye(event);
                 case Request.CANCEL -> handleCancel(event);
-                case Request.OPTIONS -> serverTransaction(event)
-                        .sendResponse(messageFactory.createResponse(Response.OK, request));
-                default -> serverTransaction(event)
-                        .sendResponse(messageFactory.createResponse(Response.NOT_IMPLEMENTED, request));
+                case Request.OPTIONS -> send(serverTransaction(event), messageFactory.createResponse(Response.OK, request));
+                default -> send(serverTransaction(event), messageFactory.createResponse(Response.NOT_IMPLEMENTED, request));
             }
         } catch (Exception e) {
             log.error("Failed to handle {} {}", request.getMethod(), callId(request), e);
@@ -146,7 +148,7 @@ public class SipServer implements SipListener, CallSignaling {
             return; // retransmission of an INVITE we are already handling
         }
         ServerTransaction tx = serverTransaction(event);
-        tx.sendResponse(messageFactory.createResponse(Response.TRYING, request));
+        send(tx, messageFactory.createResponse(Response.TRYING, request));
 
         PendingInvite invite = new PendingInvite(tx, request, newTag());
         pending.put(callId, invite);
@@ -166,7 +168,7 @@ public class SipServer implements SipListener, CallSignaling {
                 Response response = response(Response.QUEUED, invite);
                 response.addHeader(headerFactory.createHeader("X-Queue-Position", String.valueOf(queued.position())));
                 try {
-                    tx.sendResponse(response);
+                    send(tx, response);
                 } catch (SipException e) {
                     // an agent freed up and answered between routing and here; 182 is no longer needed
                     log.debug("Skipped 182 for {}: {}", callId, e.getMessage());
@@ -174,7 +176,7 @@ public class SipServer implements SipListener, CallSignaling {
             }
             case RoutingDecision.Rejected rejected -> {
                 if (pending.remove(callId) != null) {
-                    tx.sendResponse(response(Response.BUSY_HERE, invite));
+                    send(tx, response(Response.BUSY_HERE, invite));
                 }
             }
         }
@@ -182,7 +184,7 @@ public class SipServer implements SipListener, CallSignaling {
 
     private void handleBye(RequestEvent event) throws Exception {
         Request request = event.getRequest();
-        serverTransaction(event).sendResponse(messageFactory.createResponse(Response.OK, request));
+        send(serverTransaction(event), messageFactory.createResponse(Response.OK, request));
         log.info("BYE {}", callId(request));
         router.onCallEnded(callId(request));
     }
@@ -190,11 +192,11 @@ public class SipServer implements SipListener, CallSignaling {
     private void handleCancel(RequestEvent event) throws Exception {
         Request request = event.getRequest();
         String callId = callId(request);
-        serverTransaction(event).sendResponse(messageFactory.createResponse(Response.OK, request));
+        send(serverTransaction(event), messageFactory.createResponse(Response.OK, request));
 
         PendingInvite invite = pending.remove(callId);
         if (invite != null) {
-            invite.tx().sendResponse(response(Response.REQUEST_TERMINATED, invite));
+            send(invite.tx(), response(Response.REQUEST_TERMINATED, invite));
             router.onCallAbandoned(callId);
         }
         log.info("CANCEL {}", callId);
@@ -209,12 +211,12 @@ public class SipServer implements SipListener, CallSignaling {
             return false;
         }
         try {
-            invite.tx().sendResponse(response(Response.RINGING, invite));
+            send(invite.tx(), response(Response.RINGING, invite));
 
             Response ok = response(Response.OK, invite);
             ok.addHeader(contact);
             ok.addHeader(headerFactory.createHeader("X-Agent-Id", agentId));
-            invite.tx().sendResponse(ok);
+            send(invite.tx(), ok);
             return true;
         } catch (Exception e) {
             log.warn("Could not answer call {}", callId, e);
@@ -223,6 +225,12 @@ public class SipServer implements SipListener, CallSignaling {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Every response goes out through here, so the UI's SIP diagram sees it. */
+    private void send(ServerTransaction tx, Response response) throws SipException, InvalidArgumentException {
+        tx.sendResponse(response);
+        trace.outgoing(response);
+    }
 
     private ServerTransaction serverTransaction(RequestEvent event) throws SipException {
         ServerTransaction tx = event.getServerTransaction();

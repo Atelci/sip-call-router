@@ -15,7 +15,10 @@ flowchart LR
     subgraph App["Spring Boot app"]
         S["SipServer<br/>(JAIN-SIP)"] --> R["CallRouter<br/>(routing logic)"]
         API["REST API :8080"] --> R
+        SIM["CallGenerator<br/>(started from the page)"] -- "SIP / UDP 5060" --> S
     end
+    S -- "every SIP message" --> T(["sip-messages channel<br/>+ sip:{callId} list"])
+    T -- "SSE /api/events" --> B
     R <--> Redis[("Redis<br/>agents · queue · calls · stats")]
     R -- "publish" --> E(["call-events channel"])
     E -- "subscribe" --> W["wallboard (Go)"]
@@ -51,6 +54,8 @@ carol `[de, billing]` (`callrouter.agents` in `application.yml`).
 | `call:{callId}` | HASH | from, to, skill, state, agentId, wait time; gets a 1h TTL once finished |
 | `stats` | HASH | counters via `HINCRBY`, plus `waitMsTotal` (average wait = `waitMsTotal / connected`) |
 | `call-events` | PUB/SUB | JSON event per call state change |
+| `sip:{callId}` | LIST | every SIP message of the call (direction, first line, raw text) as JSON; 1h TTL |
+| `sip-messages` | PUB/SUB | the same JSON, one message per SIP packet, for the browser's ladder diagrams |
 
 ## Run it
 
@@ -88,9 +93,20 @@ It shows calls waiting (in total and per queue), calls active, free agents, aver
 and the latest events.
 It only subscribes to `call-events` and reads Redis; it never calls the Java service.
 
-Or open **http://localhost:8080/** for the same view in a browser. The page listens to `GET /api/events`, a
-Server-Sent Events stream that forwards every `call-events` message (`curl -N localhost:8080/api/events` shows the
-raw stream).
+Or open **http://localhost:8080/** for the browser view. It has:
+
+- **Call generator**: a form that starts simulated callers inside the app (`POST /api/simulator/calls`). They are
+  real SIP clients on virtual threads sending UDP to port 5060, so they go through exactly the same path as
+  `callgen.py` (a Java twin of it, `simulator/SimulatedCaller.java`).
+- **SIP signaling**: a ladder diagram per call (caller ⇄ router) that grows live as messages are sent and received,
+  with queue positions and agent names on the arrows. Click an arrow to see the full SIP message. It shows what
+  `SipServer` sees, so the ACK for a `486`/`487` is missing: JAIN-SIP absorbs it inside the INVITE transaction.
+- **Queues**: every queue with its fill level against `max-queue-size` and the waiting callers in order with live
+  wait times, plus the connected calls (agent, wait, talk time) and each agent's status.
+
+The page listens to `GET /api/events`, a Server-Sent Events stream with two event types: `call` (every
+`call-events` message) and `sip` (every `sip-messages` message). `curl -N localhost:8080/api/events` shows the raw
+stream; `curl -s localhost:8080/api/calls/{callId}/sip` returns one call's SIP history.
 
 ## Demo script
 
@@ -119,10 +135,12 @@ src/main/java/io/github/atelci/callrouter/
   sip/SipServer.java          SIP UAS: maps SIP requests to routing calls and decisions to SIP responses
   call/CallRouter.java        routing logic (skill -> connect / queue / reject; drain queues oldest first)
   agent/AgentService.java     agent state and skill pools in Redis
+  sip/SipTrace.java           records every SIP message (Redis list + sip-messages channel) for the UI diagrams
   api/                        REST endpoints, plus EventStreamController (SSE /api/events)
+  simulator/                  CallGenerator + SimulatedCaller: SIP callers started from the browser page
   config/                     properties, Redis pub/sub listener
 src/main/resources/redis/     claim-agent.lua: claims an agent from every pool at once (and pops a queued call)
-src/main/resources/static/    index.html: live browser view of the event stream (plain JS, no build step)
+src/main/resources/static/    index.html: call generator, live queues, SIP ladder diagrams (plain JS, no build step)
 simulator/callgen.py          SIP caller simulator (standard library only)
 wallboard/main.go             Go terminal wallboard fed by the call-events channel (go-redis)
 ```
@@ -200,6 +218,15 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   was wrong (it expected a call for a not-yet-known skill to queue, but the router correctly treats it as general
   and connects it), so it was split into two clearer tests. Re-checked in Docker afterwards
   (`docker compose --profile full up -d --build`): default, mixed-skills and CANCEL runs all behave the same.
+- UI upgrade: call generator, live SIP ladder diagrams and queue view on the browser page. Asked for the three
+  features; Claude Code chose the design: the SIP diagrams come from a `SipTrace` hook in `SipServer` (every
+  received request and sent response goes to a Redis list per call and a `sip-messages` channel, forwarded over the
+  existing SSE stream), so `callgen.py` traffic and traffic from any other instance shows up too. The generator is a
+  Java port of `callgen.py` on virtual threads rather than the page spawning Python, so it works in the Docker
+  image (no Python there). Checked in Docker and with `callgen.py`: connect, queue and drain, `486` and
+  CANCEL → `487` all draw correctly, and a page opened mid-call loads the earlier messages from Redis.
+  Nothing needed fixing by hand. One thing found while testing: the caller's ACK for a `486`/`487` never shows,
+  because JAIN-SIP absorbs it in the INVITE transaction; that is documented rather than worked around.
 
 ## Next steps
 

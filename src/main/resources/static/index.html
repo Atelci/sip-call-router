@@ -1,8 +1,11 @@
 <!doctype html>
 <!--
-  Live browser wallboard. Served by Spring Boot at http://localhost:8080/
-  Listens to GET /api/events (Server-Sent Events fed by the Redis call-events channel)
-  and re-reads GET /api/stats whenever an event arrives. No build step, no framework.
+  Live browser view of the router. Served by Spring Boot at http://localhost:8080/
+  - GET /api/events (Server-Sent Events): "call" events from Redis call-events, "sip" events from sip-messages
+  - on every event it re-reads /api/stats, /api/queue, /api/calls/active and /api/agents
+  - POST /api/simulator/calls starts simulated SIP callers inside the app
+  - each call gets a SIP ladder diagram built from its "sip" events (history from /api/calls/{id}/sip)
+  No build step, no framework.
 -->
 <html lang="en">
 <head>
@@ -10,27 +13,115 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Call Router Live</title>
 <style>
-  :root { --bg: #f7f7f5; --card: #fff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de; --accent: #2f6fdb; }
+  :root { --bg: #f7f7f5; --card: #fff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de; --accent: #2f6fdb;
+          --ok: #1f8a4c; --warn: #b7791f; --bad: #c53b3b; --soft: #f0f0ec; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #161615; --card: #1f1f1d; --text: #ececea; --muted: #9a9a94; --line: #33332f; --accent: #6c9cf0; }
+    :root { --bg: #161615; --card: #1f1f1d; --text: #ececea; --muted: #9a9a94; --line: #33332f; --accent: #6c9cf0;
+            --ok: #4cc283; --warn: #e0a84a; --bad: #ec6b6b; --soft: #282825; }
   }
+  * { box-sizing: border-box; }
   body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
          font: 15px/1.4 system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; }
+  main { max-width: 1240px; margin: 0 auto; }
   h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: baseline; gap: 8px; }
+  h2 small { color: var(--muted); font-weight: normal; font-size: 12px; }
   #status { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 10px; }
-  #queues { color: var(--muted); font-size: 13px; margin-bottom: 24px; white-space: pre-wrap; }
-  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .muted { color: var(--muted); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile, .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .tile { padding: 12px 14px; }
   .tile b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
   .tile span { color: var(--muted); font-size: 13px; }
-  h2 { font-size: 15px; margin: 0 0 8px; }
-  ol { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
-  li { padding: 6px 12px; border-top: 1px solid var(--line); font: 13px/1.5 ui-monospace, monospace;
-       white-space: pre; overflow: hidden; text-overflow: ellipsis; }
-  li:first-child { border-top: 0; }
-  li .agent { color: var(--accent); }
-  li.empty { color: var(--muted); font-family: inherit; }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .side { display: grid; gap: 20px; }
+  .card { padding: 14px; }
+
+  /* call generator */
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+  label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+  input[type=number] { width: 100%; padding: 6px 8px; font: inherit; font-size: 14px; color: var(--text);
+                       background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  fieldset { grid-column: 1 / -1; border: 0; margin: 0; padding: 0; }
+  legend { font-size: 12px; color: var(--muted); padding: 0; margin-bottom: 4px; }
+  .skills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .skills label { display: flex; align-items: center; gap: 5px; color: var(--text); font-size: 13px;
+                  border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 7px; cursor: pointer; }
+  .form-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }
+  button { font: inherit; font-size: 14px; font-weight: 600; padding: 7px 16px; border: 0; border-radius: 6px;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  #genResult { font-size: 13px; color: var(--muted); }
+
+  /* queues, connected calls, agents */
+  .queue { padding: 8px 0; border-top: 1px solid var(--line); }
+  .queue:first-of-type { border-top: 0; padding-top: 0; }
+  .queue-head { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+  .queue-head b { min-width: 64px; }
+  .meter { flex: 1; height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--warn); transition: width .3s; }
+  .meter.full i { background: var(--bad); }
+  .slots { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+  .chip { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--soft); white-space: nowrap; }
+  .chip .pos { color: var(--muted); margin-right: 4px; }
+  .empty { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: normal; color: var(--muted); font-size: 12px; padding: 0 6px 4px 0; }
+  td { padding: 5px 6px 5px 0; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .agent { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin: 0 12px 6px 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .AVAILABLE .dot { background: var(--ok); }
+  .BUSY .dot { background: var(--warn); }
+
+  /* SIP ladder diagrams */
+  #calls { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+  .call { padding: 12px 12px 8px; transition: opacity .6s; }
+  .call.done { opacity: .55; }
+  .call.leaving { opacity: 0; }
+  .call-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
+  .call-head b { font-size: 14px; }
+  .badge { font-size: 11px; font-weight: 600; letter-spacing: .02em; padding: 2px 7px; border-radius: 999px;
+           background: var(--soft); color: var(--muted); margin-left: auto; }
+  .badge.QUEUED { color: var(--warn); }
+  .badge.CONNECTED { color: var(--ok); }
+  .badge.REJECTED, .badge.ABANDONED { color: var(--bad); }
+  .lanes { display: flex; justify-content: space-between; margin-left: 46px; font-size: 11px; color: var(--muted);
+           text-transform: uppercase; letter-spacing: .05em; }
+  .lanes span { width: 20%; text-align: center; }
+  .rows { position: relative; margin-left: 46px; padding: 4px 0 6px; }
+  .rows::before, .rows::after { content: ''; position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--line); }
+  .rows::before { left: 10%; }
+  .rows::after { right: 10%; }
+  .msg { position: relative; }
+  .msg .t { position: absolute; left: -46px; width: 40px; top: 6px; text-align: right; font-size: 10px;
+            color: var(--muted); font-variant-numeric: tabular-nums; }
+  .arrow { position: relative; display: block; width: 80%; margin: 0 10%; height: 26px; padding: 0;
+           background: none; border-radius: 0; color: var(--accent); cursor: pointer; font-weight: normal; }
+  .arrow::before { content: ''; position: absolute; left: 0; right: 0; bottom: 6px; border-top: 1.5px solid currentColor; }
+  .arrow::after { content: ''; position: absolute; bottom: 2px; border: 4.5px solid transparent; }
+  .in .arrow::after { right: -1px; border-left: 8px solid currentColor; border-right-width: 0; }
+  .out .arrow::after { left: -1px; border-right: 8px solid currentColor; border-left-width: 0; }
+  .arrow .label { position: absolute; left: 0; right: 0; top: 1px; text-align: center; font-size: 12px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .arrow .label small { color: var(--muted); }
+  .msg.r1xx .arrow { color: var(--muted); }
+  .msg.r2xx .arrow { color: var(--ok); }
+  .msg.rerr .arrow { color: var(--bad); }
+  .msg.new { animation: flash 1s ease-out; }
+  @keyframes flash { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } to { background: transparent; } }
+  pre.raw { margin: 2px 0 8px; padding: 8px; font-size: 11px; line-height: 1.45; background: var(--soft);
+            border-radius: 6px; white-space: pre-wrap; word-break: break-all; color: var(--text); }
+  .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
+
+  ol { list-style: none; margin: 0; padding: 0; }
+  #events li { padding: 4px 0; border-top: 1px solid var(--line); font-size: 12px; white-space: pre;
+               overflow: hidden; text-overflow: ellipsis; }
+  #events li:first-child { border-top: 0; }
+  #events .agent-id { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -44,50 +135,354 @@
     <div class="tile"><b id="availableAgents">-</b><span>agents free</span></div>
     <div class="tile"><b id="avgWait">-</b><span>average wait</span></div>
   </div>
-  <div id="queues"></div>
 
-  <h2>Events</h2>
-  <ol id="events"><li class="empty">waiting for calls (run callgen.py)</li></ol>
+  <div class="layout">
+    <div class="side">
+      <section class="card">
+        <h2>Call generator <small>real SIP over UDP to :5060</small></h2>
+        <form id="generator">
+          <label>Callers <input type="number" name="calls" value="10" min="1" max="50"></label>
+          <label>Seconds between callers <input type="number" name="interval" value="0.5" min="0" step="0.1"></label>
+          <label>Talk min (s) <input type="number" name="talkMin" value="3" min="0" step="0.5"></label>
+          <label>Talk max (s) <input type="number" name="talkMax" value="8" min="0" step="0.5"></label>
+          <label>Patience in queue (s) <input type="number" name="patience" value="20" min="1" step="1"></label>
+          <fieldset>
+            <legend>Dial (one picked at random per caller)</legend>
+            <div class="skills" id="skillPicker"></div>
+          </fieldset>
+          <div class="form-foot">
+            <button type="submit">Start calls</button>
+            <span id="genResult"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Queues <small id="queueCap"></small></h2>
+        <div id="queues"></div>
+      </section>
+
+      <section class="card">
+        <h2>Connected calls</h2>
+        <div id="active"></div>
+      </section>
+
+      <section class="card">
+        <h2>Agents</h2>
+        <div id="agents"></div>
+      </section>
+
+      <section class="card">
+        <h2>Events</h2>
+        <ol id="events" class="mono"><li class="empty">waiting for calls</li></ol>
+      </section>
+    </div>
+
+    <section>
+      <h2>SIP signaling <small>caller ⇄ router, per call</small></h2>
+      <p class="hint">Click any arrow to see the full SIP message.</p>
+      <div id="calls"><div class="card empty">No calls yet. Start some with the call generator (or run callgen.py).</div></div>
+    </section>
+  </div>
 </main>
 
 <script>
-  const MAX_EVENTS = 30;
-  const list = document.getElementById('events');
-  const status = document.getElementById('status');
+  const $ = id => document.getElementById(id);
+  const MAX_EVENTS = 20, MAX_CALL_CARDS = 16, KEEP_FINISHED_MS = 20000;
+  const FINAL = new Set(['ENDED', 'REJECTED', 'ABANDONED']);
 
-  async function refreshStats() {
-    const s = await (await fetch('/api/stats')).json();
-    for (const key of ['queueLength', 'activeCalls', 'availableAgents']) {
-      document.getElementById(key).textContent = s[key] ?? 0;
-    }
-    document.getElementById('avgWait').textContent =
-      s.connected ? (s.waitMsTotal / s.connected / 1000).toFixed(1) + 's' : '-';
-    // waiting calls per queue: general first, then one per skill
-    const queues = Object.entries(s.queues ?? {}).sort(([a], [b]) => (a === 'general' ? -1 : b === 'general' ? 1 : a.localeCompare(b)));
-    document.getElementById('queues').textContent =
-      'waiting by queue:  ' + queues.map(([name, n]) => `${name} ${n}`).join('  ·  ');
+  /** Tiny DOM helper: el('span', 'chip', 'text') */
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  /** "sip:sim3@127.0.0.1" -> "sim3" */
+  const who = uri => (uri || '?').replace(/^sips?:/, '').split('@')[0];
+  const secs = ms => (ms / 1000).toFixed(0) + 's';
+
+  // ------------------------------------------------------------------ dashboard panels
+
+  let knownSkills = null;   // filled once from /api/agents, used for the generator's checkboxes
+
+  async function getJson(url) { return (await fetch(url)).json(); }
+
+  let refreshTimer = null;
+  function scheduleRefresh() {        // events come in bursts: coalesce them into one refresh
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refresh, 150);
   }
 
-  function addEvent(e) {
-    if (list.firstElementChild?.classList.contains('empty')) list.innerHTML = '';
-    const li = document.createElement('li');
-    const time = new Date(e.timestamp).toLocaleTimeString();
-    li.textContent = `${time}  ${e.type.padEnd(15)} ${e.callId.slice(0, 12)}`;
-    if (e.agentId) {
-      const agent = document.createElement('span');
-      agent.className = 'agent';
-      agent.textContent = '  -> ' + e.agentId;
-      li.append(agent);
+  async function refresh() {
+    const [stats, queues, active, agents] = await Promise.all(
+      ['/api/stats', '/api/queue', '/api/calls/active', '/api/agents'].map(getJson));
+    renderStats(stats);
+    renderQueues(queues, stats.maxQueueSize);
+    renderActive(active);
+    renderAgents(agents);
+    // a page opened mid-call still gets a diagram for every waiting and connected call
+    for (const call of [...Object.values(queues).flat(), ...active]) ensureCall(call.callId, call, true);
+  }
+
+  function renderStats(s) {
+    for (const key of ['queueLength', 'activeCalls', 'availableAgents']) $(key).textContent = s[key] ?? 0;
+    $('avgWait').textContent = s.connected ? (s.waitMsTotal / s.connected / 1000).toFixed(1) + 's' : '-';
+  }
+
+  function renderQueues(queues, max) {
+    $('queueCap').textContent = max ? `max ${max} waiting per queue` : '';
+    const box = $('queues');
+    box.replaceChildren();
+    const names = Object.keys(queues).sort((a, b) => a === 'general' ? -1 : b === 'general' ? 1 : a.localeCompare(b));
+    for (const name of names) {
+      const calls = queues[name];
+      const q = el('div', 'queue');
+      const head = el('div', 'queue-head');
+      head.append(el('b', null, name));
+      const meter = el('div', 'meter' + (max && calls.length >= max ? ' full' : ''));
+      const fill = el('i');
+      fill.style.width = max ? Math.min(100, calls.length / max * 100) + '%' : '0';
+      meter.append(fill);
+      head.append(meter, el('span', 'muted', max ? `${calls.length}/${max}` : String(calls.length)));
+      const slots = el('div', 'slots');
+      if (!calls.length) slots.append(el('span', 'empty', 'empty'));
+      calls.forEach((c, i) => {
+        const chip = el('span', 'chip');
+        chip.append(el('span', 'pos', '#' + (i + 1)), who(c.from) + ' ');
+        chip.append(timer(c.createdAt));
+        slots.append(chip);
+      });
+      q.append(head, slots);
+      box.append(q);
     }
+  }
+
+  function renderActive(calls) {
+    const box = $('active');
+    if (!calls.length) { box.replaceChildren(el('div', 'empty', 'none')); return; }
+    calls.sort((a, b) => a.connectedAt - b.connectedAt);
+    const table = el('table');
+    const head = el('tr');
+    for (const h of ['caller', 'dialed', 'agent', 'waited', 'talking']) head.append(el('th', null, h));
+    table.append(head);
+    for (const c of calls) {
+      const tr = el('tr');
+      const talking = el('td');
+      talking.append(timer(c.connectedAt));
+      tr.append(el('td', null, who(c.from)), el('td', null, c.skill || 'general'), el('td', null, c.agentId),
+                el('td', null, secs(+c.waitMs || 0)), talking);
+      table.append(tr);
+    }
+    box.replaceChildren(table);
+  }
+
+  function renderAgents(agents) {
+    const box = $('agents');
+    box.replaceChildren();
+    agents.sort((a, b) => a.id.localeCompare(b.id));
+    for (const a of agents) {
+      const span = el('span', 'agent ' + a.status);
+      span.title = a.status + (a.currentCallId ? ' on ' + a.currentCallId : '');
+      span.append(el('span', 'dot'), a.id, el('span', 'muted', a.skills.length ? a.skills.join(', ') : 'general'));
+      box.append(span);
+    }
+    if (!knownSkills) {
+      knownSkills = [...new Set(agents.flatMap(a => a.skills))].sort();
+      renderSkillPicker();
+    }
+  }
+
+  /** A span that counts up from an epoch-ms timestamp; the 1s ticker below keeps it current. */
+  function timer(since) {
+    const span = el('span', 'live');
+    span.dataset.since = since;
+    span.textContent = secs(Date.now() - since);
+    return span;
+  }
+  setInterval(() => {
+    for (const s of document.querySelectorAll('.live')) s.textContent = secs(Date.now() - s.dataset.since);
+  }, 1000);
+
+  // ------------------------------------------------------------------ call generator
+
+  function renderSkillPicker() {
+    const box = $('skillPicker');
+    box.replaceChildren();
+    for (const skill of ['support', ...knownSkills]) {
+      const label = el('label');
+      const box2 = el('input');
+      box2.type = 'checkbox';
+      box2.name = 'skills';
+      box2.value = skill;
+      box2.checked = true;
+      label.append(box2, skill === 'support' ? 'support (general)' : skill);
+      box.append(label);
+    }
+  }
+
+  $('generator').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.target, button = form.querySelector('button');
+    const num = name => Number(form.elements[name].value);
+    const body = {
+      calls: num('calls'), interval: num('interval'), talkMin: num('talkMin'), talkMax: num('talkMax'),
+      patience: num('patience'),
+      skills: [...form.querySelectorAll('input[name=skills]:checked')].map(c => c.value),
+    };
+    button.disabled = true;
+    try {
+      const res = await fetch('/api/simulator/calls', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      $('genResult').textContent = res.ok
+        ? `started ${body.calls} caller${body.calls > 1 ? 's' : ''}`
+        : 'failed: ' + ((await res.json().catch(() => ({}))).message || res.status);
+    } catch (err) {
+      $('genResult').textContent = 'failed: ' + err.message;
+    } finally {
+      setTimeout(() => { button.disabled = false; }, 800);
+    }
+  });
+
+  // ------------------------------------------------------------------ SIP ladder diagrams
+
+  /** callId -> { card, rows, badge, info, seen:Set, start, state } */
+  const calls = new Map();
+
+  function ensureCall(callId, info = {}, loadHistory = false) {
+    let call = calls.get(callId);
+    if (!call) {
+      if ($('calls').firstElementChild?.classList.contains('empty')) $('calls').replaceChildren();
+      const card = el('article', 'card call');
+      const head = el('div', 'call-head');
+      const name = el('b'), meta = el('span', 'muted'), badge = el('span', 'badge', 'NEW');
+      head.append(name, meta, badge);
+      const lanes = el('div', 'lanes');
+      lanes.append(el('span', null, 'caller'), el('span', null, 'router'));
+      const rows = el('div', 'rows');
+      card.append(head, lanes, rows);
+      card.title = callId;
+      $('calls').prepend(card);
+      call = { card, rows, name, meta, badge, seen: new Set(), start: null, state: null, info: {} };
+      calls.set(callId, call);
+      trimCards();
+      if (loadHistory) {   // messages from before the page was opened
+        getJson('/api/calls/' + encodeURIComponent(callId) + '/sip')
+          .then(list => list.forEach(m => addSipMessage(m, false)));
+      }
+    }
+    Object.assign(call.info, Object.fromEntries(Object.entries(info).filter(([, v]) => v != null)));
+    call.name.textContent = who(call.info.from);
+    call.meta.textContent = [call.info.skill || call.info.dialed, call.info.agentId && '→ ' + call.info.agentId]
+      .filter(Boolean).join(' ');
+    if (info.state) setState(call, info.state);
+    return call;
+  }
+
+  function setState(call, state) {
+    if (call.state && FINAL.has(call.state)) return;   // a late duplicate must not revive a finished call
+    call.state = state;
+    call.badge.textContent = state;
+    call.badge.className = 'badge ' + state;
+    if (FINAL.has(state)) {
+      call.card.classList.add('done');
+      setTimeout(() => {
+        call.card.classList.add('leaving');
+        setTimeout(() => removeCall(call), 700);
+      }, KEEP_FINISHED_MS);
+    }
+  }
+
+  function removeCall(call) {
+    call.card.remove();
+    for (const [id, c] of calls) if (c === call) calls.delete(id);
+  }
+
+  function trimCards() {
+    while (calls.size > MAX_CALL_CARDS) {   // drop the oldest finished call, else the oldest (Map keeps insertion order)
+      const all = [...calls.values()];
+      removeCall(all.find(c => FINAL.has(c.state)) || all[0]);
+    }
+  }
+
+  /** One SIP message as an arrow: requests go caller -> router (IN), responses router -> caller (OUT). */
+  function addSipMessage(m, live = true) {
+    if (m.method === 'OPTIONS') return;   // keep-alive pings are not calls
+    const call = ensureCall(m.callId, { from: m.direction === 'IN' ? header(m.raw, 'From') : null });
+    const key = m.timestamp + m.direction + m.label + m.method;
+    if (call.seen.has(key)) return;   // history fetch and live stream can overlap
+    call.seen.add(key);
+    if (call.start == null || m.timestamp < call.start) call.start = m.timestamp;
+
+    if (m.label === 'INVITE') call.info.dialed = (m.raw.match(/^INVITE sips?:([^@\s]+)/) || [])[1];
+    const code = parseInt(m.label, 10);
+    const kind = isNaN(code) ? 'req' : code < 200 ? 'r1xx' : code < 300 ? 'r2xx' : 'rerr';
+
+    const row = el('div', `msg ${m.direction === 'IN' ? 'in' : 'out'} ${kind}` + (live ? ' new' : ''));
+    row.dataset.ts = m.timestamp;
+    const arrow = el('button', 'arrow');
+    arrow.type = 'button';
+    const label = el('span', 'label mono', m.label + ' ');
+    const note = noteFor(m, kind);
+    if (note) label.append(el('small', null, note));
+    arrow.append(label);
+    const time = el('span', 't');
+    row.append(time, arrow);
+    const raw = el('pre', 'raw mono', m.raw.trim());
+    raw.hidden = true;
+    row.append(raw);
+    arrow.addEventListener('click', () => { raw.hidden = !raw.hidden; });
+
+    // keep rows in time order even when history arrives after live messages
+    const after = [...call.rows.children].find(r => +r.dataset.ts > m.timestamp);
+    call.rows.insertBefore(row, after || null);
+    for (const r of call.rows.children) r.firstChild.textContent = '+' + ((r.dataset.ts - call.start) / 1000).toFixed(1) + 's';
+
+    if (kind === 'rerr' && code === 486) setState(call, 'REJECTED');
+    ensureCall(m.callId);   // refresh the header with what we learned (dialed user)
+  }
+
+  /** Short hint next to the label: queue position, agent, or which request a final response answers. */
+  function noteFor(m, kind) {
+    const pos = header(m.raw, 'X-Queue-Position'), agent = header(m.raw, 'X-Agent-Id');
+    if (pos) return 'pos ' + pos;
+    if (agent) return agent;
+    if (kind === 'r2xx' && m.method !== 'INVITE') return m.method;
+    return '';
+  }
+
+  /** Value of a SIP header in a raw message (From returns just the URI). */
+  function header(raw, name) {
+    const line = raw.split(/\r?\n/).find(l => l.toLowerCase().startsWith(name.toLowerCase() + ':'));
+    if (!line) return null;
+    const value = line.slice(name.length + 1).trim();
+    return name === 'From' ? (value.match(/<([^>]+)>/) || [, value])[1] : value;
+  }
+
+  // ------------------------------------------------------------------ live stream
+
+  function addEvent(e) {
+    const list = $('events');
+    if (list.firstElementChild?.classList.contains('empty')) list.replaceChildren();
+    const li = el('li', null, `${new Date(e.timestamp).toLocaleTimeString()}  ${e.type.padEnd(15)} ${e.callId.slice(0, 12)}`);
+    if (e.agentId) li.append(el('span', 'agent-id', '  -> ' + e.agentId));
     list.prepend(li);
     while (list.children.length > MAX_EVENTS) list.lastElementChild.remove();
   }
 
+  function onCallEvent(e) {
+    addEvent(e);
+    const state = e.type.replace('CALL_', '');
+    ensureCall(e.callId, { from: e.from, agentId: e.agentId, state: state === 'RECEIVED' ? 'NEW' : state });
+    scheduleRefresh();
+  }
+
   // EventSource reconnects by itself if the app restarts.
   const source = new EventSource('/api/events');
-  source.onopen = () => { status.textContent = 'live: streaming /api/events'; refreshStats(); };
-  source.onerror = () => { status.textContent = 'disconnected, retrying...'; };
-  source.addEventListener('call', msg => { addEvent(JSON.parse(msg.data)); refreshStats(); });
+  source.onopen = () => { $('status').textContent = 'live: streaming /api/events'; refresh(); };
+  source.onerror = () => { $('status').textContent = 'disconnected, retrying...'; };
+  source.addEventListener('call', msg => onCallEvent(JSON.parse(msg.data)));
+  source.addEventListener('sip', msg => addSipMessage(JSON.parse(msg.data)));
 </script>
 </body>
 </html>

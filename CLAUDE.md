@@ -30,8 +30,11 @@ docker compose run --rm wallboard                     # live Go wallboard
   is the skill (`sip:billing@...`); unknown skill or `support` = general. One queue per skill, drained oldest-head first.
 - `agent/AgentService` — agents with skills; a free agent is in ZSET `agents:available` and in `agents:available:{skill}`
   for each skill (score = idle-since). Claiming is `resources/redis/claim-agent.lua` (removes the agent from every pool).
-- `api/` — REST: `/api/agents`, `/api/agents/{id}/status`, `/api/queue`, `/api/calls/active`, `/api/stats`;
-  SSE `/api/events` (`EventStreamController`, fed by the Redis listener in `RedisConfig`). Browser page: `static/index.html`.
+- `sip/SipTrace` — every SIP message in/out goes to Redis list `sip:{callId}` + channel `sip-messages` (UI ladder diagrams).
+- `simulator/` — `CallGenerator` + `SimulatedCaller`: Java port of callgen.py on virtual threads, started from the page.
+- `api/` — REST: `/api/agents`, `/api/agents/{id}/status`, `/api/queue`, `/api/calls/active`, `/api/calls/{id}/sip`,
+  `/api/stats`, `POST /api/simulator/calls`; SSE `/api/events` with event types `call` and `sip` (`EventStreamController`,
+  fed by the Redis listener in `RedisConfig`). Browser page: `static/index.html` (generator, queues, SIP diagrams).
 - Redis keys are documented in `redis/RedisKeys.java`.
 
 ## Current status
@@ -59,6 +62,8 @@ docker compose run --rm wallboard                     # live Go wallboard
    (callgen sends `rport`); added `.dockerignore`. Re-checked with skills routing 2026-10-20.
 7. ~~Skills-based routing (README "Next steps").~~ Done 2026-10-20. The rest of "Next steps" in README.md
    (media, AI overflow, atomic new-call path) are talking points for the interview, not planned work.
+8. ~~UI: call generator on the page, live SIP ladder diagrams per call, queue view.~~ Done 2026-10-20
+   (checked in Docker; the ACK for 486/487 is not drawn because JAIN-SIP absorbs it).
 
 ## Conventions
 

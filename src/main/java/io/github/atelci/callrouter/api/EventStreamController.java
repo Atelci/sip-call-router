@@ -1,12 +1,9 @@
 package io.github.atelci.callrouter.api;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import org.springframework.data.redis.connection.Message;
-import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,10 +13,11 @@ import org.springframework.web.context.request.async.AsyncRequestNotUsableExcept
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
- * Streams the Redis {@code call-events} channel to browsers as Server-Sent Events.
+ * Streams two Redis channels to browsers as Server-Sent Events:
+ * {@code call-events} as SSE event "call" and {@code sip-messages} as SSE event "sip".
  *
  * <pre>
- * router --PUBLISH--> Redis call-events --(this listener)--> every open GET /api/events
+ * router --PUBLISH--> Redis call-events / sip-messages --(listener in RedisConfig)--> every open GET /api/events
  * </pre>
  *
  * Because the source is Redis pub/sub and not the router itself, a browser connected to any
@@ -27,7 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  */
 @RestController
 @RequestMapping("/api")
-public class EventStreamController implements MessageListener {
+public class EventStreamController {
 
     private final List<SseEmitter> clients = new CopyOnWriteArrayList<>();
 
@@ -52,13 +50,11 @@ public class EventStreamController implements MessageListener {
     public void clientDisconnected() {
     }
 
-    /** Called by the Redis listener container for every message on {@code call-events}. */
-    @Override
-    public void onMessage(Message message, byte[] pattern) {
-        String json = new String(message.getBody(), StandardCharsets.UTF_8);
+    /** Called by the Redis listener container for every message on one of our channels. */
+    public void forward(String eventName, String json) {
         for (SseEmitter client : clients) {
             try {
-                client.send(SseEmitter.event().name("call").data(json, MediaType.APPLICATION_JSON));
+                client.send(SseEmitter.event().name(eventName).data(json, MediaType.APPLICATION_JSON));
             } catch (IOException | IllegalStateException e) {
                 clients.remove(client);   // browser went away
             }

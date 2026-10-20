@@ -8,9 +8,11 @@ import java.util.TreeMap;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.github.atelci.callrouter.config.RouterProperties;
 import io.github.atelci.callrouter.redis.RedisKeys;
 
 /** Read-only views of call state, straight from Redis. */
@@ -19,9 +21,11 @@ import io.github.atelci.callrouter.redis.RedisKeys;
 public class CallController {
 
     private final StringRedisTemplate redis;
+    private final RouterProperties props;
 
-    public CallController(StringRedisTemplate redis) {
+    public CallController(StringRedisTemplate redis, RouterProperties props) {
         this.redis = redis;
+        this.props = props;
     }
 
     /** Waiting calls per queue ("general" plus one per skill), each in queue order. */
@@ -41,6 +45,13 @@ public class CallController {
         return ids == null ? List.of() : ids.stream().map(this::call).toList();
     }
 
+    /** Every SIP message of one call, oldest first, as recorded by SipTrace (JSON strings straight from Redis). */
+    @GetMapping(path = "/calls/{callId}/sip", produces = "application/json")
+    public String sipTrace(@PathVariable String callId) {
+        List<String> messages = redis.opsForList().range(RedisKeys.sipTrace(callId), 0, -1);
+        return "[" + String.join(",", messages == null ? List.of() : messages) + "]";
+    }
+
     @GetMapping("/stats")
     public Map<String, Object> stats() {
         Map<String, Object> stats = new TreeMap<>();
@@ -49,6 +60,7 @@ public class CallController {
         queueKeys().forEach((name, key) -> queueLengths.put(name, redis.opsForList().size(key)));
         stats.put("queueLength", queueLengths.values().stream().mapToLong(Long::longValue).sum());
         stats.put("queues", queueLengths);
+        stats.put("maxQueueSize", props.maxQueueSize());   // per queue
         stats.put("activeCalls", redis.opsForSet().size(RedisKeys.CALLS_ACTIVE));
         stats.put("availableAgents", redis.opsForZSet().zCard(RedisKeys.AGENTS_AVAILABLE));
         return stats;

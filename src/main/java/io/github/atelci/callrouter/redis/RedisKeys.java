@@ -15,6 +15,8 @@ package io.github.atelci.callrouter.redis;
  * call:{callId}             HASH   from, to, skill, state, agentId, createdAt, connectedAt, waitMs (TTL after end)
  * stats                     HASH   counters: total, connected, queued, rejected, abandoned, ended, waitMsTotal
  * call-events               PUB/SUB channel with JSON call events
+ * sip:{callId}              LIST   every SIP message of a call, as JSON, for the UI's ladder diagram (TTL 1h)
+ * sip-messages              PUB/SUB channel with the same JSON, one message per SIP packet
  * </pre>
  *
  * A {@code null} skill means "general": the all-agents pool and the general queue.
@@ -28,6 +30,7 @@ public final class RedisKeys {
     public static final String CALLS_ACTIVE = "calls:active";
     public static final String STATS = "stats";
     public static final String EVENTS_CHANNEL = "call-events";
+    public static final String SIP_CHANNEL = "sip-messages";
     public static final String AGENT_PREFIX = "agent:";
 
     private RedisKeys() {
@@ -39,6 +42,10 @@ public final class RedisKeys {
 
     public static String call(String callId) {
         return "call:" + callId;
+    }
+
+    public static String sipTrace(String callId) {
+        return "sip:" + callId;
     }
 
     /** Free-agent pool for a skill, or the all-agents pool for a general call. */
