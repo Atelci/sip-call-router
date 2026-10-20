@@ -16,8 +16,12 @@ Each simulated caller is a tiny SIP user agent client (UAC) on its own UDP socke
 
 No dependencies beyond the standard library.
 
+The user part of the dialed URI picks the router's skill queue: sip:support@... is a general
+call, sip:billing@... waits for an agent with the billing skill (see --skills).
+
 Usage:
     python3 callgen.py --calls 8 --talk 3 8 --patience 15
+    python3 callgen.py --calls 10 --skills en de billing support
 """
 
 import argparse
@@ -64,6 +68,7 @@ class SipResponse:
 @dataclass
 class Result:
     caller: int
+    dialed: str
     outcome: str  # CONNECTED / REJECTED / ABANDONED / FAILED
     agent: str = "-"
     wait: float = 0.0
@@ -71,8 +76,9 @@ class Result:
 
 
 class Caller:
-    def __init__(self, n: int, host: str, port: int, talk_range, patience: float):
+    def __init__(self, n: int, host: str, port: int, talk_range, patience: float, dialed: str = "support"):
         self.n = n
+        self.dialed = dialed
         self.server = (host, port)
         self.talk_range = talk_range
         self.patience = patience
@@ -84,7 +90,7 @@ class Caller:
         self.call_id = f"{uuid.uuid4().hex[:12]}@callgen"
         self.from_tag = uuid.uuid4().hex[:8]
         self.invite_branch = self.branch()
-        self.request_uri = f"sip:support@{host}:{port}"
+        self.request_uri = f"sip:{dialed}@{host}:{port}"
 
     # ------------------------------------------------------------- message building
 
@@ -93,7 +99,7 @@ class Caller:
         return "z9hG4bK" + uuid.uuid4().hex[:16]  # magic cookie required by RFC 3261
 
     def build(self, method: str, uri: str, branch: str, cseq: int, to_tag: str | None = None) -> bytes:
-        to = f"<sip:support@{self.server[0]}>" + (f";tag={to_tag}" if to_tag else "")
+        to = f"<sip:{self.dialed}@{self.server[0]}>" + (f";tag={to_tag}" if to_tag else "")
         lines = [
             f"{method} {uri} SIP/2.0",
             f"Via: SIP/2.0/UDP {self.local_host}:{self.local_port};branch={branch};rport",
@@ -136,14 +142,14 @@ class Caller:
             return self._run()
         except Exception as e:  # keep one broken call from killing the run
             log(self.n, f"error: {e}")
-            return Result(self.n, "FAILED")
+            return Result(self.n, self.dialed, "FAILED")
         finally:
             self.sock.close()
 
     def _run(self) -> Result:
         start = time.monotonic()
         self.send(self.build("INVITE", self.request_uri, self.invite_branch, 1))
-        log(self.n, "-> INVITE")
+        log(self.n, f"-> INVITE {self.dialed}")
 
         cancelled = False
         while True:
@@ -157,7 +163,7 @@ class Caller:
             if resp is None:
                 if cancelled:
                     log(self.n, "no answer to CANCEL")
-                    return Result(self.n, "FAILED")
+                    return Result(self.n, self.dialed, "FAILED")
                 continue
 
             if resp.cseq_method == "CANCEL":
@@ -178,7 +184,7 @@ class Caller:
             self.ack_non_2xx(resp)
             log(self.n, f"<- {resp.status} {resp.reason}")
             outcome = "ABANDONED" if resp.status == 487 else "REJECTED"
-            return Result(self.n, outcome, wait=time.monotonic() - start)
+            return Result(self.n, self.dialed, outcome, wait=time.monotonic() - start)
 
     def talk(self, ok: SipResponse, waited: float) -> Result:
         agent = ok.headers.get("x-agent-id", "?")
@@ -200,7 +206,7 @@ class Caller:
             if resp and resp.cseq_method == "BYE":
                 log(self.n, f"<- {resp.status} {resp.reason} (BYE)")
                 break
-        return Result(self.n, "CONNECTED", agent, waited, talk)
+        return Result(self.n, self.dialed, "CONNECTED", agent, waited, talk)
 
 
 def main() -> None:
@@ -212,21 +218,25 @@ def main() -> None:
     parser.add_argument("--talk", type=float, nargs=2, default=[3, 8], metavar=("MIN", "MAX"),
                         help="talk time range in seconds")
     parser.add_argument("--patience", type=float, default=20, help="seconds a caller waits in queue")
+    parser.add_argument("--skills", nargs="+", default=["support"], metavar="USER",
+                        help="users to dial, one picked at random per caller (e.g. en de billing support)")
+    parser.add_argument("--seed", type=int, help="random seed, for a repeatable run")
     args = parser.parse_args()
+    random.seed(args.seed)
 
-    print(f"Calling sip:support@{args.host}:{args.port} with {args.calls} callers\n")
+    print(f"Calling {', '.join(args.skills)} at {args.host}:{args.port} with {args.calls} callers\n")
     with ThreadPoolExecutor(max_workers=args.calls) as pool:
         futures = []
         for n in range(1, args.calls + 1):
-            caller = Caller(n, args.host, args.port, args.talk, args.patience)
+            caller = Caller(n, args.host, args.port, args.talk, args.patience, random.choice(args.skills))
             futures.append(pool.submit(caller.run))
             time.sleep(args.interval)
         results = [f.result() for f in futures]
 
     print("\nSummary")
-    print(f"{'caller':<10}{'outcome':<12}{'agent':<10}{'wait s':>8}{'talk s':>8}")
+    print(f"{'caller':<11}{'dialed':<10}{'outcome':<12}{'agent':<10}{'wait s':>8}{'talk s':>8}")
     for r in results:
-        print(f"caller-{r.caller:02d}  {r.outcome:<12}{r.agent:<10}{r.wait:>8.1f}{r.talk:>8.1f}")
+        print(f"caller-{r.caller:02d}  {r.dialed:<10}{r.outcome:<12}{r.agent:<10}{r.wait:>8.1f}{r.talk:>8.1f}")
     for outcome in ("CONNECTED", "REJECTED", "ABANDONED", "FAILED"):
         count = sum(r.outcome == outcome for r in results)
         if count:

@@ -1,7 +1,8 @@
 # SIP Call Router
 
 A mini contact-center call router (ACD). Customers call in over **SIP**, a **Java / Spring Boot** service
-routes each call to the longest-idle agent, and calls queue in **Redis** when everyone is busy.
+routes each call to the longest-idle agent with the right skill (language, product), and calls queue in
+**Redis** when everyone suitable is busy.
 A **Python** call generator simulates callers, and a **Go** wallboard shows the live numbers.
 
 Signaling only: no audio (RTP), which keeps the project small while exercising the real SIP call flow.
@@ -22,24 +23,32 @@ flowchart LR
     W -- "read counters" --> Redis
 ```
 
+The user part of the dialed URI picks the skill, the way a dialed number does in a real ACD:
+`sip:billing@router` waits for an agent with the `billing` skill; `sip:support@router` (or any name that is not
+a skill) is a general call that any agent can take. The demo agents are alice `[en, billing]`, bob `[en]` and
+carol `[de, billing]` (`callrouter.agents` in `application.yml`).
+
 | Situation | What the caller gets |
 |---|---|
-| An agent is free | `100 Trying` → `180 Ringing` → `200 OK` with `X-Agent-Id` |
-| All agents busy | `182 Queued` with `X-Queue-Position`, then `180` + `200 OK` when an agent frees up |
-| Queue full (`max-queue-size`) | `486 Busy Here` |
+| An agent with the skill is free | `100 Trying` → `180 Ringing` → `200 OK` with `X-Agent-Id` |
+| All agents with the skill busy | `182 Queued` with `X-Queue-Position`, then `180` + `200 OK` when one frees up |
+| That skill's queue full (`max-queue-size`) | `486 Busy Here` |
 | Caller hangs up while queued | `CANCEL` → `200 OK` + `487 Request Terminated` |
-| Call ends | `BYE` → `200 OK`; the agent goes back to the free pool and takes the next queued call |
+| Call ends | `BYE` → `200 OK`; the agent goes back to its free pools and takes the longest-waiting call it can handle |
 
 ### Redis data model
 
 | Key | Type | Purpose |
 |---|---|---|
 | `agents:all` | SET | every agent id |
-| `agents:available` | ZSET | free agents scored by idle-since time. `ZPOPMIN` = longest-idle agent, atomically |
-| `agent:{id}` | HASH | `status`, `currentCallId` |
-| `queue:calls` | LIST | waiting calls, FIFO (`RPUSH` / `LPOP`) |
+| `skills` | SET | every skill some agent has |
+| `agents:available` | ZSET | all free agents scored by idle-since time. `ZPOPMIN` = longest-idle agent |
+| `agents:available:{skill}` | ZSET | free agents with that skill, same scores |
+| `agent:{id}` | HASH | `status`, `currentCallId`, `skills` |
+| `queue:calls` | LIST | general calls waiting, FIFO (`RPUSH` / `LPOP`) |
+| `queue:calls:{skill}` | LIST | calls waiting for that skill, FIFO |
 | `calls:active` | SET | connected calls |
-| `call:{callId}` | HASH | from, to, state, agentId, wait time; gets a 1h TTL once finished |
+| `call:{callId}` | HASH | from, to, skill, state, agentId, wait time; gets a 1h TTL once finished |
 | `stats` | HASH | counters via `HINCRBY`, plus `waitMsTotal` (average wait = `waitMsTotal / connected`) |
 | `call-events` | PUB/SUB | JSON event per call state change |
 
@@ -63,13 +72,20 @@ In a second terminal, place some calls (3 agents are seeded: alice, bob, carol; 
 python3 simulator/callgen.py --calls 10 --talk 3 8 --patience 15
 ```
 
+Or a mix of skills (each caller dials one at random; `--seed` makes the run repeatable):
+
+```bash
+python3 simulator/callgen.py --calls 12 --talk 4 7 --interval 0.4 --skills en de billing support --seed 7
+```
+
 In a third terminal, the live wallboard (built and run in Docker, so Go is not needed):
 
 ```bash
 docker compose run --rm wallboard
 ```
 
-It shows calls waiting, calls active, free agents, average wait, each agent's status and the latest events.
+It shows calls waiting (in total and per queue), calls active, free agents, average wait, each agent's status
+and the latest events.
 It only subscribes to `call-events` and reads Redis; it never calls the Java service.
 
 Or open **http://localhost:8080/** for the same view in a browser. The page listens to `GET /api/events`, a
@@ -91,8 +107,9 @@ curl -s localhost:8080/api/stats | jq
 curl -X POST localhost:8080/api/agents/bob/status -H 'Content-Type: application/json' -d '{"status":"OFFLINE"}'
 curl -X POST localhost:8080/api/agents/bob/status -H 'Content-Type: application/json' -d '{"status":"AVAILABLE"}'
 
-# add a new agent
-curl -X POST localhost:8080/api/agents/dave
+# add a new German-speaking agent and bring them online (takes a waiting "de" call right away)
+curl -X POST "localhost:8080/api/agents/dave?skills=de"
+curl -X POST localhost:8080/api/agents/dave/status -H 'Content-Type: application/json' -d '{"status":"AVAILABLE"}'
 ```
 
 ## Project layout
@@ -100,12 +117,12 @@ curl -X POST localhost:8080/api/agents/dave
 ```
 src/main/java/io/github/atelci/callrouter/
   sip/SipServer.java          SIP UAS: maps SIP requests to routing calls and decisions to SIP responses
-  call/CallRouter.java        routing logic (connect / queue / reject / drain queue)
-  agent/AgentService.java     agent state in Redis
+  call/CallRouter.java        routing logic (skill -> connect / queue / reject; drain queues oldest first)
+  agent/AgentService.java     agent state and skill pools in Redis
   api/                        REST endpoints, plus EventStreamController (SSE /api/events)
-src/main/resources/static/    index.html: live browser view of the event stream (plain JS, no build step)
   config/                     properties, Redis pub/sub listener
-src/main/resources/redis/     Lua script that pairs a queued call with a free agent atomically
+src/main/resources/redis/     claim-agent.lua: claims an agent from every pool at once (and pops a queued call)
+src/main/resources/static/    index.html: live browser view of the event stream (plain JS, no build step)
 simulator/callgen.py          SIP caller simulator (standard library only)
 wallboard/main.go             Go terminal wallboard fed by the call-events channel (go-redis)
 ```
@@ -116,10 +133,16 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
   so it can be tested with a fake and the SIP stack could be swapped.
 - **State in Redis, transactions in memory.** Open SIP INVITE transactions are live protocol objects, so they
   stay in the JVM; everything about the call itself is in Redis.
-- **Serving the queue is atomic.** When an agent frees up, "pop the oldest call + claim the longest-idle agent +
-  mark it busy" runs as one Redis Lua script (`src/main/resources/redis/claim-next-call.lua`). With separate
-  `LPOP` and `ZPOPMIN` calls, a second instance could take the last agent in between: the popped call would
-  then have to be pushed back (losing its place, or lost entirely if the instance crashed in between).
+- **Skills are just more pools.** A free agent is in the all-agents ZSET and in one ZSET per skill, all with the
+  same idle-since score, so "longest-idle agent who speaks German" is a `ZPOPMIN` on `agents:available:de`. The
+  catch is that a claimed agent must leave all of its pools at once, or a billing call could claim the same
+  agent a moment later. That is why claiming is a Lua script.
+- **Claiming is atomic.** "Pop the oldest call + claim the longest-idle agent + take it out of every pool + mark
+  it busy" runs as one Redis Lua script (`src/main/resources/redis/claim-agent.lua`); a new call uses the same
+  script without the queue part. With separate commands, a second instance could take the last agent in between:
+  the popped call would then have to be pushed back (losing its place, or lost entirely if the instance crashed).
+- **Fair across queues.** When an agent frees up, the router tries the queues in order of how long their first
+  caller has waited, so a multi-skilled agent takes the longest-waiting call it can actually handle.
 - **Still not fully multi-instance.** The new-call path (claim an agent, else check the queue size and enqueue)
   is several commands, so router methods stay `synchronized`. Two instances could briefly over-fill the queue
   by one. The fix is the same idea (one more script), plus sticky SIP routing so a call's BYE and CANCEL reach
@@ -167,10 +190,19 @@ wallboard/main.go             Go terminal wallboard fed by the call-events chann
     response headers were never flushed. The endpoint now sends an SSE comment (`:connected`) right away;
   - reloading the page while events flowed logged an ERROR stack trace (Tomcat reporting the closed connection).
     A small `@ExceptionHandler` in the controller treats a disconnected browser as normal.
+- Skills-based routing: the dialed SIP user picks the skill; one free-agent ZSET and one queue per skill;
+  `claim-agent.lua` replaces `claim-next-call.lua` and takes a claimed agent out of all its pools. `callgen.py`
+  got `--skills` and `--seed`, the REST API, the wallboard and the browser page show per-queue waiting counts, and
+  `POST /api/agents/{id}?skills=...` registers an agent with skills. Six new tests (14 in total): the skill beats
+  idle time, a skill call waits while other agents stay free, an unknown skill is general, a claimed agent leaves
+  every pool, a freed agent takes the longest-waiting call it can handle, CANCEL from a skill queue. Checked end to
+  end with a 12-caller mixed run: every call reached an agent with its skill. Fixed by hand: one of the new tests
+  was wrong (it expected a call for a not-yet-known skill to queue, but the router correctly treats it as general
+  and connects it), so it was split into two clearer tests.
 
 ## Next steps
 
 - Media: SDP offer/answer and RTP bridging to the agent's phone
-- Skills-based routing (language, product) with one ZSET per skill
-- Live wallboard over Server-Sent Events fed by the `call-events` channel
-- Hand overflow calls to an AI voice agent instead of rejecting them
+- Hand overflow calls to an AI voice agent instead of rejecting them (needs media; a signaling-only first step
+  would be a `302` redirect to an AI agent's SIP URI instead of `486`)
+- Make the new-call path atomic too (claim or enqueue in one script) so several router instances are fully safe

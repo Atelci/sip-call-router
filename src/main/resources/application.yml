@@ -21,10 +21,12 @@ callrouter:
     advertise-host: ${SIP_ADVERTISE_HOST:127.0.0.1}
     port: ${SIP_PORT:5060}
   max-queue-size: 5
+  # agent id -> skills. Callers pick a skill by the user they dial: sip:billing@... goes to the
+  # billing queue; sip:support@... (or any name that is not a skill) is a general call for anyone.
   agents:
-    - alice
-    - bob
-    - carol
+    alice: [en, billing]
+    bob: [en]
+    carol: [de, billing]
 
 logging:
   level:

@@ -23,7 +23,8 @@ import (
 // Redis keys, as documented in RedisKeys.java.
 const (
 	eventsChannel = "call-events"
-	callQueue     = "queue:calls"
+	callQueue     = "queue:calls" // general queue; skill queues are "queue:calls:<skill>"
+	skillsKey     = "skills"
 	agentsAll     = "agents:all"
 	agentsFree    = "agents:available"
 	callsActive   = "calls:active"
@@ -44,6 +45,7 @@ type callEvent struct {
 // snapshot is everything one screen shows, read from Redis in one round trip.
 type snapshot struct {
 	waiting, freeAgents, activeCalls int64
+	queues                           map[string]int64  // "general" or skill -> calls waiting
 	agents                           map[string]string // agent id -> status
 	stats                            map[string]string // counters from the stats hash
 }
@@ -82,28 +84,33 @@ func main() {
 	}
 }
 
-// read fetches the counters with one pipeline, then each agent's status with a second one.
+// read fetches the counters and the lists of agents and skills with one pipeline, then each
+// queue's length and each agent's status with a second one.
 func read(ctx context.Context, rdb *redis.Client) (snapshot, error) {
 	var (
-		waiting, free, active *redis.IntCmd
-		stats                 *redis.MapStringStringCmd
-		ids                   *redis.StringSliceCmd
+		free, active *redis.IntCmd
+		stats        *redis.MapStringStringCmd
+		ids, skills  *redis.StringSliceCmd
 	)
 	_, err := rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
-		waiting = p.LLen(ctx, callQueue)
 		free = p.ZCard(ctx, agentsFree)
 		active = p.SCard(ctx, callsActive)
 		stats = p.HGetAll(ctx, statsKey)
 		ids = p.SMembers(ctx, agentsAll)
+		skills = p.SMembers(ctx, skillsKey)
 		return nil
 	})
 	if err != nil {
 		return snapshot{}, err
 	}
 
-	agents := map[string]string{}
+	lengths := map[string]*redis.IntCmd{}
 	statuses := map[string]*redis.StringCmd{}
 	_, err = rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
+		lengths["general"] = p.LLen(ctx, callQueue)
+		for _, skill := range skills.Val() {
+			lengths[skill] = p.LLen(ctx, callQueue+":"+skill)
+		}
 		for _, id := range ids.Val() {
 			statuses[id] = p.HGet(ctx, "agent:"+id, "status")
 		}
@@ -112,12 +119,21 @@ func read(ctx context.Context, rdb *redis.Client) (snapshot, error) {
 	if err != nil && err != redis.Nil {
 		return snapshot{}, err
 	}
+
+	var waiting int64
+	queues := map[string]int64{}
+	for name, cmd := range lengths {
+		queues[name] = cmd.Val()
+		waiting += cmd.Val()
+	}
+	agents := map[string]string{}
 	for id, cmd := range statuses {
 		agents[id] = cmd.Val()
 	}
 
 	return snapshot{
-		waiting:     waiting.Val(),
+		waiting:     waiting,
+		queues:      queues,
 		freeAgents:  free.Val(),
 		activeCalls: active.Val(),
 		agents:      agents,
@@ -135,7 +151,7 @@ func draw(addr string, s snapshot, err error, recent []string) {
 		return
 	}
 
-	fmt.Fprintf(&b, "  Calls waiting   %3d\n", s.waiting)
+	fmt.Fprintf(&b, "  Calls waiting   %3d   %s\n", s.waiting, byQueue(s.queues))
 	fmt.Fprintf(&b, "  Calls active    %3d\n", s.activeCalls)
 	fmt.Fprintf(&b, "  Agents free     %3d / %d\n", s.freeAgents, len(s.agents))
 	fmt.Fprintf(&b, "  Average wait    %s\n\n", averageWait(s.stats))
@@ -159,6 +175,22 @@ func draw(addr string, s snapshot, err error, recent []string) {
 		b.WriteString("    " + line + "\n")
 	}
 	fmt.Print(b.String())
+}
+
+// byQueue lists the waiting calls per queue, general first, e.g. "general:1  billing:2  en:0".
+func byQueue(queues map[string]int64) string {
+	names := make([]string, 0, len(queues))
+	for name := range queues {
+		if name != "general" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	parts := []string{fmt.Sprintf("general:%d", queues["general"])}
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s:%d", name, queues[name]))
+	}
+	return strings.Join(parts, "  ")
 }
 
 // averageWait is the mean time a connected call waited for an agent (waitMsTotal / connected).

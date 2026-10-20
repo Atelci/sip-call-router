@@ -1,6 +1,7 @@
 package io.github.atelci.callrouter.config;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -9,10 +10,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param sip          SIP listener settings
  * @param maxQueueSize calls allowed to wait for an agent; the next caller gets 486 Busy Here
- * @param agents       agent ids seeded as AVAILABLE on startup (demo data)
+ * @param agents       agent id -> skills, seeded as AVAILABLE on startup (demo data)
  */
 @ConfigurationProperties(prefix = "callrouter")
-public record RouterProperties(Sip sip, int maxQueueSize, List<String> agents) {
+public record RouterProperties(Sip sip, int maxQueueSize, Map<String, List<String>> agents) {
 
     /**
      * @param bindHost      interface the SIP stack listens on

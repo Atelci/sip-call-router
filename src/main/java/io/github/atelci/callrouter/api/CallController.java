@@ -24,11 +24,15 @@ public class CallController {
         this.redis = redis;
     }
 
-    /** Waiting calls in queue order. */
+    /** Waiting calls per queue ("general" plus one per skill), each in queue order. */
     @GetMapping("/queue")
-    public List<Map<String, Object>> queue() {
-        List<String> ids = redis.opsForList().range(RedisKeys.CALL_QUEUE, 0, -1);
-        return ids == null ? List.of() : ids.stream().map(this::call).toList();
+    public Map<String, List<Map<String, Object>>> queue() {
+        Map<String, List<Map<String, Object>>> queues = new TreeMap<>();
+        queueKeys().forEach((name, key) -> {
+            List<String> ids = redis.opsForList().range(key, 0, -1);
+            queues.put(name, ids == null ? List.of() : ids.stream().map(this::call).toList());
+        });
+        return queues;
     }
 
     @GetMapping("/calls/active")
@@ -41,10 +45,24 @@ public class CallController {
     public Map<String, Object> stats() {
         Map<String, Object> stats = new TreeMap<>();
         redis.opsForHash().entries(RedisKeys.STATS).forEach((k, v) -> stats.put(k.toString(), Long.parseLong(v.toString())));
-        stats.put("queueLength", redis.opsForList().size(RedisKeys.CALL_QUEUE));
+        Map<String, Long> queueLengths = new TreeMap<>();
+        queueKeys().forEach((name, key) -> queueLengths.put(name, redis.opsForList().size(key)));
+        stats.put("queueLength", queueLengths.values().stream().mapToLong(Long::longValue).sum());
+        stats.put("queues", queueLengths);
         stats.put("activeCalls", redis.opsForSet().size(RedisKeys.CALLS_ACTIVE));
         stats.put("availableAgents", redis.opsForZSet().zCard(RedisKeys.AGENTS_AVAILABLE));
         return stats;
+    }
+
+    /** Queue name -> Redis key: "general" and one per known skill. */
+    private Map<String, String> queueKeys() {
+        Map<String, String> keys = new TreeMap<>();
+        keys.put("general", RedisKeys.callQueue(null));
+        Set<String> skills = redis.opsForSet().members(RedisKeys.SKILLS);
+        if (skills != null) {
+            skills.forEach(skill -> keys.put(skill, RedisKeys.callQueue(skill)));
+        }
+        return keys;
     }
 
     private Map<String, Object> call(String callId) {

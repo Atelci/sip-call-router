@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -76,7 +77,7 @@ class CallRouterTest {
             return null;
         });
         agents = new AgentService(redis);
-        RouterProperties props = new RouterProperties(null, MAX_QUEUE_SIZE, List.of());
+        RouterProperties props = new RouterProperties(null, MAX_QUEUE_SIZE, Map.of());
         router = new CallRouter(redis, agents, new CallEventPublisher(redis, new ObjectMapper()), props);
         signaling = new FakeSignaling();
         router.setSignaling(signaling);
@@ -182,7 +183,7 @@ class CallRouterTest {
             agents.markAvailable("a" + i);
         }
         FakeSignaling shared = new FakeSignaling();
-        RouterProperties props = new RouterProperties(null, calls, List.of());
+        RouterProperties props = new RouterProperties(null, calls, Map.of());
         CallEventPublisher events = new CallEventPublisher(redis, new ObjectMapper());
         List<CallRouter> instances = List.of(
                 new CallRouter(redis, agents, events, props),
@@ -207,9 +208,88 @@ class CallRouterTest {
         assertThat(agents.availableCount()).isZero();
     }
 
+    // ------------------------------------------------------------- skills-based routing
+
+    @Test
+    void skilledCallGoesToAgentWithThatSkillEvenIfAnotherIsIdleLonger() throws InterruptedException {
+        freeAgent("alice", "en");                             // idle longest, but no German
+        freeAgent("bob", "de");
+
+        RoutingDecision decision = router.onIncomingCall("c1", "caller1", "de", "de");
+
+        assertThat(decision).isEqualTo(new RoutingDecision.Connected("bob"));
+        assertThat(redis.opsForHash().get(RedisKeys.call("c1"), "skill")).isEqualTo("de");
+    }
+
+    @Test
+    void skilledCallWaitsInItsOwnQueueWhileOtherAgentsStayFree() throws InterruptedException {
+        freeAgent("alice", "en");
+        agents.register("carol", List.of("de"));             // the only German speaker, offline
+
+        RoutingDecision decision = router.onIncomingCall("c1", "caller1", "de", "de");
+
+        assertThat(decision).isInstanceOf(RoutingDecision.Queued.class);
+        assertThat(redis.opsForList().range(RedisKeys.callQueue("de"), 0, -1)).containsExactly("c1");
+        assertThat(agents.availableCount()).isEqualTo(1);   // alice was not taken for a German call
+        assertThat(router.onIncomingCall("c2", "caller2", "support"))
+                .isEqualTo(new RoutingDecision.Connected("alice"));
+    }
+
+    @Test
+    void callForASkillNobodyHasIsTreatedAsGeneral() throws InterruptedException {
+        freeAgent("alice", "en");
+
+        RoutingDecision decision = router.onIncomingCall("c1", "caller1", "support", "support");
+
+        assertThat(decision).isEqualTo(new RoutingDecision.Connected("alice"));
+        assertThat(redis.opsForHash().get(RedisKeys.call("c1"), "skill")).isNull();
+    }
+
+    @Test
+    void claimedAgentLeavesEveryPoolItIsIn() throws InterruptedException {
+        freeAgent("alice", "en", "billing");
+
+        router.onIncomingCall("c1", "caller1", "support");   // general call takes alice
+
+        assertThat(redis.opsForZSet().zCard(RedisKeys.AGENTS_AVAILABLE)).isZero();
+        assertThat(redis.opsForZSet().zCard(RedisKeys.agentsAvailable("en"))).isZero();
+        assertThat(redis.opsForZSet().zCard(RedisKeys.agentsAvailable("billing"))).isZero();
+        assertThat(router.onIncomingCall("c2", "caller2", "billing", "billing"))
+                .isInstanceOf(RoutingDecision.Queued.class);  // alice is not handed out twice
+    }
+
+    @Test
+    void freedAgentTakesTheLongestWaitingCallItCanHandle() throws InterruptedException {
+        freeAgent("alice", "en", "de");
+        agents.register("bob", List.of("billing"));          // makes "billing" known, stays offline
+        router.onIncomingCall("c1", "caller1", "en", "en");             // alice is busy from here on
+        router.onIncomingCall("c2", "caller2", "billing", "billing");   // oldest, but alice can't take it
+        Thread.sleep(5);
+        router.onIncomingCall("c3", "caller3", "de", "de");             // alice can
+        Thread.sleep(5);
+        router.onIncomingCall("c4", "caller4", "support");              // general: anyone can
+
+        router.onCallEnded("c1");
+
+        assertThat(signaling.answered).containsExactly("c1->alice", "c3->alice");
+        assertThat(redis.opsForList().range(RedisKeys.callQueue("billing"), 0, -1)).containsExactly("c2");
+        assertThat(redis.opsForList().range(RedisKeys.CALL_QUEUE, 0, -1)).containsExactly("c4");
+    }
+
+    @Test
+    void cancelRemovesCallFromItsSkillQueue() throws InterruptedException {
+        agents.register("bob", List.of("billing"));
+        router.onIncomingCall("c1", "caller1", "billing", "billing");
+
+        router.onCallAbandoned("c1");
+
+        assertThat(callState("c1")).isEqualTo("ABANDONED");
+        assertThat(redis.opsForList().size(RedisKeys.callQueue("billing"))).isZero();
+    }
+
     /** Registers an agent as free. The short sleep gives each agent a distinct idle-since score. */
-    private void freeAgent(String agentId) throws InterruptedException {
-        agents.register(agentId);
+    private void freeAgent(String agentId, String... skills) throws InterruptedException {
+        agents.register(agentId, List.of(skills));
         agents.markAvailable(agentId);
         Thread.sleep(5);
     }

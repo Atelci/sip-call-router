@@ -20,6 +20,7 @@ import javax.sip.SipStack;
 import javax.sip.TimeoutEvent;
 import javax.sip.TransactionTerminatedEvent;
 import javax.sip.address.AddressFactory;
+import javax.sip.address.SipURI;
 import javax.sip.header.CallIdHeader;
 import javax.sip.header.ContactHeader;
 import javax.sip.header.FromHeader;
@@ -152,9 +153,11 @@ public class SipServer implements SipListener, CallSignaling {
 
         String from = ((FromHeader) request.getHeader(FromHeader.NAME)).getAddress().getURI().toString();
         String to = ((ToHeader) request.getHeader(ToHeader.NAME)).getAddress().getURI().toString();
-        log.info("INVITE {} from {}", callId, from);
+        // The dialed user picks the skill, like a dialed number does in a real ACD: sip:billing@router
+        String dialed = request.getRequestURI() instanceof SipURI uri ? uri.getUser() : null;
+        log.info("INVITE {} from {} for {}", callId, from, dialed);
 
-        RoutingDecision decision = router.onIncomingCall(callId, from, to);
+        RoutingDecision decision = router.onIncomingCall(callId, from, to, dialed);
         switch (decision) {
             case RoutingDecision.Connected connected -> {
                 // already answered through answer()

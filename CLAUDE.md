@@ -17,7 +17,7 @@ as extras. Keep it small and demo-able; clarity beats features. Interview is Wed
 ```bash
 docker compose up -d redis
 mvn spring-boot:run                                   # SIP udp/5060, REST :8080
-python3 simulator/callgen.py --calls 10 --talk 3 8   # simulate callers
+python3 simulator/callgen.py --calls 10 --talk 3 8   # simulate callers (add --skills en de billing support)
 mvn verify                                            # build + tests
 docker compose run --rm wallboard                     # live Go wallboard
 ```
@@ -26,16 +26,19 @@ docker compose run --rm wallboard                     # live Go wallboard
 
 - `sip/SipServer` — SipListener + `CallSignaling` implementation. Maps SIP requests to router calls and
   router decisions to SIP responses. Keeps open INVITE server transactions in an in-memory map.
-- `call/CallRouter` — routing logic; all state in Redis; queue draining is a Lua script, methods still `synchronized`.
-- `agent/AgentService` — agents; free agents in ZSET `agents:available` scored by idle-since, `ZPOPMIN` to claim.
+- `call/CallRouter` — skills-based routing; all state in Redis; methods still `synchronized`. The dialed SIP user
+  is the skill (`sip:billing@...`); unknown skill or `support` = general. One queue per skill, drained oldest-head first.
+- `agent/AgentService` — agents with skills; a free agent is in ZSET `agents:available` and in `agents:available:{skill}`
+  for each skill (score = idle-since). Claiming is `resources/redis/claim-agent.lua` (removes the agent from every pool).
 - `api/` — REST: `/api/agents`, `/api/agents/{id}/status`, `/api/queue`, `/api/calls/active`, `/api/stats`;
   SSE `/api/events` (`EventStreamController`, fed by the Redis listener in `RedisConfig`). Browser page: `static/index.html`.
 - Redis keys are documented in `redis/RedisKeys.java`.
 
 ## Current status
 
-- `mvn verify` passes (8 Testcontainers tests for `CallRouter`) and the end-to-end demo with `callgen.py` works against the real app:
-  connect, FIFO queue, 486 when full, BYE drains queue, CANCEL -> 487. Maven wrapper is in the repo.
+- `mvn verify` passes (14 Testcontainers tests for `CallRouter`) and the end-to-end demo with `callgen.py` works against the real app:
+  connect, FIFO queue, 486 when full, BYE drains queue, CANCEL -> 487, skills (`--skills en de billing support`).
+  Maven wrapper is in the repo.
 - On this Windows machine the default `java` is 1.8: set `JAVA_HOME="C:\Program Files\Java\jdk-21.0.12"`.
 - Testcontainers is pinned to 1.21.4 in the pom: Boot's 1.21.3 fails against Docker Engine 29 (old API version).
 - JAIN-SIP needs the log4j 1.x API: `reload4j` provides it (old `log4j` is excluded in the pom).
@@ -54,6 +57,8 @@ docker compose run --rm wallboard                     # live Go wallboard
    (page at http://localhost:8080/).
 6. ~~Verify `docker compose --profile full up --build` works with SIP over UDP.~~ Done 2026-10-19: works as-is
    (callgen sends `rport`); added `.dockerignore`.
+7. ~~Skills-based routing (README "Next steps").~~ Done 2026-10-20. The rest of "Next steps" in README.md
+   (media, AI overflow, atomic new-call path) are talking points for the interview, not planned work.
 
 ## Conventions
 

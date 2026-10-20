@@ -19,7 +19,8 @@
   main { max-width: 760px; margin: 0 auto; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   #status { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 10px; }
+  #queues { color: var(--muted); font-size: 13px; margin-bottom: 24px; white-space: pre-wrap; }
   .tile { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
   .tile b { display: block; font-size: 28px; font-variant-numeric: tabular-nums; }
   .tile span { color: var(--muted); font-size: 13px; }
@@ -43,6 +44,7 @@
     <div class="tile"><b id="availableAgents">-</b><span>agents free</span></div>
     <div class="tile"><b id="avgWait">-</b><span>average wait</span></div>
   </div>
+  <div id="queues"></div>
 
   <h2>Events</h2>
   <ol id="events"><li class="empty">waiting for calls (run callgen.py)</li></ol>
@@ -60,6 +62,10 @@
     }
     document.getElementById('avgWait').textContent =
       s.connected ? (s.waitMsTotal / s.connected / 1000).toFixed(1) + 's' : '-';
+    // waiting calls per queue: general first, then one per skill
+    const queues = Object.entries(s.queues ?? {}).sort(([a], [b]) => (a === 'general' ? -1 : b === 'general' ? 1 : a.localeCompare(b)));
+    document.getElementById('queues').textContent =
+      'waiting by queue:  ' + queues.map(([name, n]) => `${name} ${n}`).join('  ·  ');
   }
 
   function addEvent(e) {

@@ -1,5 +1,6 @@
 package io.github.atelci.callrouter.agent;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -33,14 +34,16 @@ public class AgentSeeder implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        redis.delete(List.of(RedisKeys.CALL_QUEUE, RedisKeys.CALLS_ACTIVE));
+        List<String> stale = new ArrayList<>(List.of(RedisKeys.CALL_QUEUE, RedisKeys.CALLS_ACTIVE));
+        agents.knownSkills().forEach(skill -> stale.add(RedisKeys.callQueue(skill)));
+        redis.delete(stale);
         if (props.agents() == null) {
             return;
         }
-        for (String id : props.agents()) {
-            agents.register(id);
+        props.agents().forEach((id, skills) -> {
+            agents.register(id, skills == null ? List.of() : skills);
             agents.markAvailable(id);
-        }
-        log.info("Seeded {} available agents: {}", props.agents().size(), props.agents());
+        });
+        log.info("Seeded {} available agents with skills: {}", props.agents().size(), props.agents());
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -36,10 +37,10 @@ public class AgentController {
         return agents.findAll();
     }
 
-    /** Adds a new agent (OFFLINE until it is set AVAILABLE). */
+    /** Adds a new agent (OFFLINE until it is set AVAILABLE), e.g. {@code POST /api/agents/dave?skills=en,billing}. */
     @PostMapping("/{agentId}")
-    public void register(@PathVariable String agentId) {
-        agents.register(agentId);
+    public void register(@PathVariable String agentId, @RequestParam(defaultValue = "") List<String> skills) {
+        agents.register(agentId, skills.stream().filter(s -> !s.isBlank()).toList());
     }
 
     /** Agent goes AVAILABLE (and may pick up a queued call right away) or OFFLINE. */

@@ -1,44 +1,43 @@
 package io.github.atelci.callrouter.call;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import io.github.atelci.callrouter.agent.AgentService;
+import io.github.atelci.callrouter.agent.AgentService.Pairing;
 import io.github.atelci.callrouter.agent.AgentStatus;
 import io.github.atelci.callrouter.config.RouterProperties;
 import io.github.atelci.callrouter.redis.RedisKeys;
 
 /**
- * The routing brain, a tiny ACD (automatic call distributor):
+ * The routing brain, a tiny ACD (automatic call distributor) with skills-based routing:
  * <ul>
- *   <li>new call + free agent  -> connect to the longest-idle agent</li>
- *   <li>new call + no agent    -> wait in a FIFO queue (up to maxQueueSize)</li>
- *   <li>queue full             -> reject</li>
- *   <li>agent frees up         -> next queued call gets that agent</li>
+ *   <li>a call asks for a skill (en, billing, ...) or is general (any agent will do)</li>
+ *   <li>new call + free agent with the skill -> connect to the longest-idle such agent</li>
+ *   <li>new call + no such agent             -> wait in that skill's FIFO queue (up to maxQueueSize)</li>
+ *   <li>queue full                           -> reject</li>
+ *   <li>agent frees up                       -> the longest-waiting call it can take gets it</li>
  * </ul>
- * All state is in Redis. Serving the queue (pop call + claim agent) is one atomic Lua script,
- * so it is safe with several instances. Methods are still synchronized because the new-call path
- * (claim agent, else check size and enqueue) is several Redis commands; see the README design notes.
+ * All state is in Redis. Claiming an agent (and, when serving a queue, popping the call) is one
+ * atomic Lua script, so that step is safe with several instances. Methods are still synchronized
+ * because the new-call path (claim agent, else check size and enqueue) is several Redis commands;
+ * see the README design notes.
  */
 @Service
 public class CallRouter {
 
     private static final Logger log = LoggerFactory.getLogger(CallRouter.class);
     private static final Duration FINISHED_CALL_TTL = Duration.ofHours(1);
-
-    /** Returns [callId, agentId] or an empty list. Raw List because RedisScript takes a Class. */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static final RedisScript<List<String>> CLAIM_NEXT_CALL = (RedisScript) RedisScript.of(
-            new ClassPathResource("redis/claim-next-call.lua"), List.class);
 
     private final StringRedisTemplate redis;
     private final AgentService agents;
@@ -60,33 +59,48 @@ public class CallRouter {
         this.signaling = signaling;
     }
 
-    public synchronized RoutingDecision onIncomingCall(String callId, String from, String to) {
-        redis.opsForHash().putAll(RedisKeys.call(callId), Map.of(
+    /** A general call: any agent can take it. */
+    public RoutingDecision onIncomingCall(String callId, String from, String to) {
+        return onIncomingCall(callId, from, to, null);
+    }
+
+    /**
+     * @param requestedSkill what the caller dialed (e.g. "billing"); if it is null or no agent
+     *                       has that skill, the call is general
+     */
+    public synchronized RoutingDecision onIncomingCall(String callId, String from, String to, String requestedSkill) {
+        String skill = requestedSkill != null && agents.knownSkills().contains(requestedSkill) ? requestedSkill : null;
+        Map<String, String> call = new HashMap<>(Map.of(
                 "from", from,
                 "to", to,
                 "state", CallState.QUEUED.name(),
                 "createdAt", String.valueOf(System.currentTimeMillis())));
+        if (skill != null) {
+            call.put("skill", skill);
+        }
+        redis.opsForHash().putAll(RedisKeys.call(callId), call);
         incrementStat("total");
         events.publish(CallEvent.of("CALL_RECEIVED", callId, null, from));
 
-        Optional<String> agent = agents.claimLongestIdle(callId);
+        Optional<String> agent = agents.claimForCall(callId, skill);
         if (agent.isPresent()) {
             return connect(callId, agent.get())
                     ? new RoutingDecision.Connected(agent.get())
                     : new RoutingDecision.Rejected();
         }
 
-        Long queueSize = redis.opsForList().size(RedisKeys.CALL_QUEUE);
+        String queue = RedisKeys.callQueue(skill);
+        Long queueSize = redis.opsForList().size(queue);
         if (queueSize != null && queueSize >= props.maxQueueSize()) {
             finish(callId, CallState.REJECTED, "rejected");
-            log.info("Call {} from {} rejected: queue full ({})", callId, from, queueSize);
+            log.info("Call {} from {} rejected: {} full ({})", callId, from, queue, queueSize);
             return new RoutingDecision.Rejected();
         }
 
-        Long position = redis.opsForList().rightPush(RedisKeys.CALL_QUEUE, callId);
+        Long position = redis.opsForList().rightPush(queue, callId);
         incrementStat("queued");
         events.publish(CallEvent.of("CALL_QUEUED", callId, null, from));
-        log.info("Call {} from {} queued at position {}", callId, from, position);
+        log.info("Call {} from {} queued in {} at position {}", callId, from, queue, position);
         return new RoutingDecision.Queued(position == null ? 0 : position);
     }
 
@@ -110,27 +124,53 @@ public class CallRouter {
 
     /** Caller gave up while waiting (SIP CANCEL). */
     public synchronized void onCallAbandoned(String callId) {
-        Long removed = redis.opsForList().remove(RedisKeys.CALL_QUEUE, 1, callId);
+        Object skill = redis.opsForHash().get(RedisKeys.call(callId), "skill");
+        String queue = RedisKeys.callQueue(skill == null ? null : skill.toString());
+        Long removed = redis.opsForList().remove(queue, 1, callId);
         if (removed != null && removed > 0) {
             finish(callId, CallState.ABANDONED, "abandoned");
-            log.info("Call {} abandoned in queue", callId);
+            log.info("Call {} abandoned in {}", callId, queue);
         }
     }
 
     /**
-     * Pairs queued calls with free agents until one side runs out. Each pairing is one Lua script
-     * (claim-next-call.lua), so two router instances draining at once can never split a pair:
-     * no call is popped without an agent, and no agent is claimed without a call.
+     * Pairs queued calls with free agents until no more pairs can be made. Queues are tried in
+     * order of how long their first caller has waited, so a freed agent with several skills takes
+     * the longest-waiting call it can handle. Each pairing is one Lua script (claim-agent.lua), so
+     * two router instances draining at once can never split a pair or hand out an agent twice.
      */
     public synchronized void drainQueue() {
-        while (true) {
-            List<String> pair = redis.execute(CLAIM_NEXT_CALL,
-                    List.of(RedisKeys.CALL_QUEUE, RedisKeys.AGENTS_AVAILABLE), RedisKeys.AGENT_PREFIX);
-            if (pair == null || pair.size() < 2) {
-                return;
+        boolean paired = true;
+        while (paired) {
+            paired = false;
+            for (String skill : queuesOldestFirst()) {
+                Optional<Pairing> pair = agents.claimForQueue(skill);
+                if (pair.isPresent()) {
+                    connect(pair.get().callId(), pair.get().agentId());
+                    paired = true;
+                    break;   // waiting times changed: sort the queues again
+                }
             }
-            connect(pair.get(0), pair.get(1));
         }
+    }
+
+    /** Non-empty queues (null = general), the one whose first call has waited longest first. */
+    private List<String> queuesOldestFirst() {
+        List<String> skills = new ArrayList<>();
+        skills.add(null);
+        skills.addAll(agents.knownSkills());
+
+        Map<String, Long> headCreatedAt = new HashMap<>();   // HashMap allows the null (general) key
+        for (String skill : skills) {
+            String head = redis.opsForList().index(RedisKeys.callQueue(skill), 0);
+            if (head != null) {
+                Object createdAt = redis.opsForHash().get(RedisKeys.call(head), "createdAt");
+                headCreatedAt.put(skill, createdAt == null ? 0L : Long.parseLong(createdAt.toString()));
+            }
+        }
+        return headCreatedAt.keySet().stream()
+                .sorted(Comparator.comparing(headCreatedAt::get))
+                .toList();
     }
 
     private boolean connect(String callId, String agentId) {
