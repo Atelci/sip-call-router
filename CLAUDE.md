@@ -61,8 +61,8 @@ docker compose run --rm wallboard                     # live Go wallboard
    (page at http://localhost:8080/).
 6. ~~Verify `docker compose --profile full up --build` works with SIP over UDP.~~ Done 2026-10-19: works as-is
    (callgen sends `rport`); added `.dockerignore`. Re-checked with skills routing 2026-10-20.
-7. ~~Skills-based routing (README "Next steps").~~ Done 2026-10-20. The rest of "Next steps" in README.md
-   (media, AI overflow, atomic new-call path) are talking points for the interview, not planned work.
+7. ~~Skills-based routing (README "Next steps").~~ Done 2026-10-20. Media, AI overflow and an atomic new-call path
+   are talking points for the interview, not planned work.
 8. ~~UI: call generator on the page, live SIP ladder diagrams per call, queue view.~~ Done 2026-10-20
    (checked in Docker; the ACK for 486/487 is not drawn because JAIN-SIP absorbs it).
 9. ~~App log tail on the page.~~ Done 2026-10-20 (`LogTailer`; JAIN-SIP's log4j output is console-only).
@@ -73,4 +73,4 @@ docker compose run --rm wallboard                     # live Go wallboard
 
 - Keep classes small and commented for a reader seeing the code for the first time in an interview.
 - No new frameworks unless they clearly earn their place.
-- Update the "Built with AI assistance" section in README.md with what was done and what needed fixing by hand.
+- Keep README.md short (1-2 minute read); no "Built with AI assistance" or "Next steps" sections.
